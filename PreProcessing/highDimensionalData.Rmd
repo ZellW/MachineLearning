@@ -1,0 +1,615 @@
+---
+title: "High Dimensional Data"
+output: html_document
+---
+
+> This RMD will take a long time to knit - more than 1 hour!
+
+```{r echo=FALSE, warning=FALSE, message=FALSE, results='hide'}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "e1071", "rpart", "RCurl", "FactoMineR", "factoextra", "ggbiplot", "dummies", "gbm", "survival", prompt = FALSE)
+#Run once:
+#library(devtools)
+#install_github("ggbiplot","vqv")
+```
+
+##Introduction
+
+What happens when a data set has too many variables ? Here are few possible situations which you might come across:
+
+- You find that most of the variables are correlated.
+- You lose patience and decide to run a model on whole data. This returns poor accuracy and you feel terrible.
+- You become indecisive about what to do
+- You start thinking of some strategic method to find few important variables
+
+I can't remember the last time I worked on a data set with less than 500 features. This isn't a big deal with today's computing power, but it can become unwieldy when you need to use certain forest-based models, heavy cross-validation, grid tuning, or any ensemble work. Note: the term variables, features, predictors are used throughout and mean the same thing. 
+
+Here are some ways of dealing with high-dimensionality data (i.e. having too many variables) are: 
+
+1. Get more computing muscle, 
+2. Prune your data set using feature selection (measure variables effectiveness and keeps only the best - built-in feature selection - see [fscaret](http://amunategui.github.io/fscaret-Walkthrough/)), 
+3. Work on a sample subset or break up the data into chunks, 
+4. Use feature reduction (also refereed as feature extraction) to create new variables made of bits and pieces of the original variables. (Thats what we are going to do.)
+
+According to Wikipedia: *Principal component analysis (PCA) is a statistical procedure that uses an orthogonal transformation to convert a set of observations of possibly correlated variables into a set of values of linearly uncorrelated variables called principal components.*
+
+Principal component analysis (PCA) looks for the set of related variables in your data that explain most of the variance and creates a new feature out of it. This becomes your first component. It will then keep doing so on the next set of variables unrelated to the first and that becomes your next component and so on. This is done in an unsupervised manner so it doesn't care what your response variable/outcome is (but you should exclude it from your data before feeding it into PCA).   
+
+The matrix should be numeric and have standardized data.  The principal components are supplied with normalized version of original predictors. This is because, the original predictors may have different scales. For example: Imagine a data set with variables’ measuring units as gallons, kilometers, light years etc. It is definite that the scale of variances in these variables will be large.
+Performing PCA on un-normalized variables will lead to insanely large loadings for variables with high variance. In turn, this will lead to dependence of a principal component on the variable with high variance. This is undesirable.
+
+PCA can be applied only on numerical data. Therefore, if the data has categorical variables they must be converted to numerical. Also, make sure you have done the basic data cleaning prior to implementing this technique. 
+
+Package {stats} There are plenty of PCA libraries in R, in this course, we'll focus on two common ones available in the base {stats} package (i.e. you don't have to download any package, its already there):
+
+1. **princomp** performs a principal components analysis on the given numeric data matrix and returns the results as an object of class “princomp”. 
+2. **prcomp** Performs a principal components analysis on the given data matrix and returns the results as an object of class “prcomp”. They both perform PCA but get there in slightly different ways - princomp uses the *eigen function* while prcomp uses *singular value decomposition* of the data. I won't pretend to understand the nuances between both approaches, and as I want to stay away from formulas and keep this very practical, I will only say that **it is important to know the existence of both functions. If one doesn't work on a particular data set, try the other**. . . . 
+
+Below several examples are provided to show how to use PCA.
+
+### Example 1 - prcomp
+
+Since skewness and the magnitude of the variables influence the resulting PCs, it is good practice to apply skewness transformation, center and scale the variables prior to the application of PCA. In the example below, we applied a log transformation to the variables but we could have been more general and applied a Box and Cox transformation. See Example 2 how to perform all those transformations and then apply PCA with only one call to the preProcess function of the caret package. 
+```{r}
+data <- log(USArrests)
+head(data)
+str(data)
+prc <- prcomp(data, scale = TRUE, center = TRUE)
+screeplot(prc)
+#screeplot.default plots the variances against the number of the principal component. This is also the plot method for classes "princomp" and "prcomp".
+summary(prc)
+```
+
+The most important piece of information from the summary information is the Proportion of Variance - the middle record above.  PC1 holds 67% of all the variance.  PC1 + PC2 = 89% of all the variance.  (This is of course also shown in the plot above too.)
+
+If you square the standard deviation will return the eigen value.  The rule suggests any value greater than 1 is important.  You can see below that PC1 and PC2 are greater or very close to 1.
+```{r}
+prc$sdev^2
+```
+
+Biplot is the projection of your data on the first two principal components (where the variances are the highest).
+
+Interpreting Points: The relative location of the points can be interpreted. Points that are close together correspond to observations that have similar scores on the components displayed in the plot. To the extent that these components fit the data well, the points also correspond to observations that have similar values on the variables. 
+
+Interpreting Vectors: Both the direction and length of the vectors can be interpreted. Vectors point away from the origin in some direction. 
+A vector points in the direction which is most like the variable represented by the vector. This is the direction which has the highest squared multiple correlation with the principal components. The length of the vector is proportional to the squared multiple correlation between the fitted values for the variable and the variable itself.
+
+The fitted values for a variable are the result of projecting the points in the space orthogonally onto the variable's vector (to do this, you must imagine extending the vector in both directions). The observations whose points project furthest in the direction in which the vector points are the observations that have the most of whatever the variable measures. Those points that project at the other end have the least. Those projecting in the middle have an average amount. 
+Thus, vectors that point in the same direction correspond to variables that have similar response profiles and can be interpreted as having similar meaning in the context set by the data. 
+
+```{r}
+biplot(prc)
+```
+
+Interpretation of biplot : For each of 50 stats in the USA, the data set contains the number of arrests per 100,000 residents for each three crimes: Assault, Murder and Rape. Also urbanpop represents percent of the population in each state living in urban areas. The plot shows the first two principal component scores and the loading vectors in a single biplot display.
+The loadings are given below:
+
+```{r}
+prc$rotation
+```
+
+From the plot as wells from the above loadings what we can understand is, first loading vector places approximately equal weight on Assault, Murder and Rape, with much less weight on urbanpop. Hence this component roughly corresponds to a measure of overall rates of serious crimes.
+
+The second loading vector places most of it weight on Urbanpop and much less weight on the other 3 features. Hence, this component roughly corresponds to the level of urbanization of the state. Overall, we see that the crime-related variables are located close to each other, and that the urbanpop variable is far from other three. This indicates hat the crime related variables are correlated with each other-States with high murder rates tend to had high assault and rape rates. Urbanpop variable is less correlated with the other three.
+
+Notice that the crimes are closely related compared with Urban Pop component.  As an example, if we sort the data by Urban Pop, we see that California has the highest population and that state is right next to the Urban Pop point.  Conversely, Vermont is the least populated state and that point is nearly opposite California.
+
+```{r}
+head(USArrests[order(USArrests$UrbanPop,decreasing=TRUE),], 3)
+head(USArrests[order(USArrests$UrbanPop,decreasing=FALSE),], 3)
+```
+
+There is package called ‘ggbiplot’ available in github which yields much better illustration on PCA.
+
+```{r}
+g <- ggbiplot(prc, obs.scale = 1, var.scale = 1, labels=row.names(USArrests),
+              ellipse = TRUE, circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', legend.position = 'top')
+print(g)
+```
+
+I am not sold on the actual utility of the biplot.  It is nice to look at but how is it truly actionable?
+
+### Example 2 - Repeat Example 1 with caret
+
+In Example 1 above, we applied skewness transformation, center and scale the variables prior to the application of PCA using a log transformation to the variables but we could have been more general and applied a Box and Cox transformation.
+
+#### Box abd Cox Transformation
+
+When an attribute has a Gaussian-like distribution but is shifted, this is called a skew. The distribution of an attribute can be shifted to reduce the skew and make it more Gaussian. The BoxCox transform can perform this operation (assumes all values are positive).
+
+Normally distributed data is needed to use a number of statistical analysis tools, such as individuals control charts, t-tests and analysis of variance (ANOVA). When data is not normally distributed, the cause for non-normality should be determined and appropriate remedial actions should be taken. Transforming data means performing the same mathematical operation on each piece of original data. 
+
+The statisticians George Box and David Cox developed a procedure to identify an appropriate exponent (Lambda = l) to use to transform data into a “normal shape.” The Lambda value indicates the power to which all data should be raised. In order to do this, the Box-Cox power transformation searches from Lambda = -5 to Lamba = +5 until the best value is found. 
+
+The Box-Cox power transformation is not a guarantee for normality. This is because it actually does not really check for normality; the method checks for the smallest standard deviation. The assumption is that among all transformations with Lambda values between -5 and +5, transformed data has the highest likelihood – but not a guarantee – to be normally distributed when standard deviation is the smallest. Therefore, it is absolutely necessary to always check the transformed data for normality using a probability plot.
+
+Additionally, the Box-Cox Power transformation only works if all the data is positive and greater than 0. This, however, can usually be achieved easily by adding a constant to all data such that it all becomes positive before it is transformed. 
+
+```{r}
+pca2_transform <- preProcess(data, method = c("BoxCox", "center", "scale", "pca"))
+pca2_preprocess <- predict(pca2_transform, newdata = data)
+pca2 <- prcomp(pca2_preprocess, center = TRUE)
+screeplot(pca2)
+summary(pca2)
+```
+
+Learn more about caret and preProcess here:  http://machinelearningmastery.com/pre-process-your-dataset-in-r/
+
+### Example 3 - princomp
+
+In this case, princomp and prcomp are very similar.
+
+```{r}
+prc2 <- princomp(data, cor = TRUE, scale=TRUE, center=TRUE)
+summary(prc2)
+screeplot(prc2)
+biplot(prc2)
+```
+
+### Example 4 - FactoMineR
+
+copied from http://www.sthda.com/english/wiki/factoextra-r-package-easy-multivariate-data-analyses-and-elegant-visualization#installing-factominer
+
+```{r}
+pca4 <- PCA(data, graph = FALSE)
+# Extract eigenvalues/variances
+get_eig(pca4)
+# Visualize eigenvalues/variances
+fviz_screeplot(pca4, addlabels=TRUE, ylim=c(0,80))
+# Extract the results for variables
+var <- get_pca_var(pca4)
+var
+# Coordinates of variables
+head(var$coord)
+# Contribution of variables
+head(var$contrib)
+# Graph of variables: default plot
+fviz_pca_var(pca4, col.var = "black")
+# It’s possible to control variable colors using their contributions (“contrib”) to the principal axes:
+fviz_pca_var(pca4, col.var="contrib",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+# Contributions of variables to PC1
+fviz_contrib(pca4, choice = "var", axes = 1, top = 10)
+# Contributions of variables to PC2
+fviz_contrib(pca4, choice = "var", axes = 2, top = 10)
+# Extract the results for individuals
+ind <- get_pca_ind(pca4)
+ind
+# Coordinates of individuals
+head(ind$coord)
+# Graph of individuals
+fviz_pca_ind(pca4, col.ind = "cos2",
+             gradient.cols = c("#00AFBB", "#E7B800", "#FC4E07"),
+             repel = TRUE)
+# Biplot of individuals and variables
+fviz_pca_biplot(pca4, repel = TRUE)
+```
+
+#### Misc PCA on IRIS
+```{r}
+# Compute PCA on the iris data set
+# The variable Species (index = 5) is removed
+# before PCA analysis
+iris.pca <- PCA(iris[,-5], graph = FALSE)
+# Visualize
+# Use habillage to specify groups for coloring
+fviz_pca_ind(iris.pca, label = "none", # hide individual labels
+             habillage = iris$Species, # color by groups
+             palette = c("#00AFBB", "#E7B800", "#FC4E07"), addEllipses = TRUE)
+```
+
+### Example 5 - A Complete Udemy Project - 1
+
+To get started, we need a data set with a lot of columns. We’re going to borrow a data set from NIPS (Neural Information Processing Systems) for a completed 2013 competition. Let’s download our data from the UC Irvine Machine Learning Repository (https://archive.ics.uci.edu/ml/datasets/Gisette) (warning: this is a large ﬁle).
+
+```{r}
+#https://archive.ics.uci.edu/ml/machine-learning-databases/gisette/GISETTE/
+gisetteRaw <- read.table("./data/gisette_train.txt", sep = '', header = FALSE, stringsAsFactors = FALSE)    
+
+g_labels <- read.table("./data/gisette_train.labels", sep = '', header = FALSE, stringsAsFactors = FALSE)   
+
+print(dim(gisetteRaw))
+gisetteRaw[1:3,]
+```
+
+The gisetteRaw data frame has 5000 columns, that’s big and that’s the kind of size we’re looking for. It also has one outcome variable, ‘cluster’. Before we can start the PCA transformation process, we need to remove the extreme near-zero variance as it won’t help us much, risks crashing the script, and slow us down. We load the caret (http://topepo.github.io/caret/index.html) package and call nearZeroVar function with saveMetrics parameter set to true. This will return a data frame with the percentage of zero variance for each feature:
+
+```{r}
+# SMALLER DATA SET: # truncate data set if you're having trouble running prcomp but note the scores won't be the same as in the walkthrough, a few percentage points lower: # 
+# gisetteRaw <-gisetteRaw[1:2000,]  
+# g_labels <-data.frame('V1'=g_labels[1:2000,] )   
+
+nzv <- nearZeroVar(gisetteRaw, saveMetrics = TRUE) 
+print(paste('Range:',range(nzv$percentUnique)))
+print(head(nzv))
+```
+
+We remove features with less than 0.1% variance.  Note - if working in medicine and the disease rate is very low, we would not remove these low frequency columns
+```{r}
+print(paste('Column count before cutoff:',ncol(gisetteRaw)))
+
+dim(nzv[nzv$percentUnique > 0.1,])
+
+gisette_nzv <- gisetteRaw[c(rownames(nzv[nzv$percentUnique > 0.1,]))] 
+print(paste('Column count after cutoff:',ncol(gisette_nzv)))
+```
+
+#### Without PCA
+
+The data is cleaned up and ready to go. Lets see how well it performs without any PCA transformation. We bind the labels (response/outcome variables) to the set:
+
+```{r}
+gisette_df <- cbind(as.data.frame(sapply(gisette_nzv, as.numeric)), cluster=g_labels$V1)
+gisette_df[nrow(gisette_df)-3: nrow(gisette_df),]
+```
+
+Going to use GBM (Generalized Boosted Models) (https://cran.rproject.org/web/packages/gbm/index.html). GBM is a classification algo that uses boosted trees. It is also one of the models supported by the caret (http://topepo.github.io/caret/index.html). 
+
+To evaluate the data, we split the data set into two parts, one for training and the other for evaluating. If you wanted a more accurate evaluation, I would recommend cross validating the data using multiple splits.
+
+```{r}
+# split data set in 1/2 into training and testing - allows us to compare with and without PCA applied
+set.seed(1234) 
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df))) 
+traindf <- gisette_df[split,] 
+testdf <-  gisette_df[-split,]
+```
+
+In this case, we are keeping things simple, we set the models parameters - trees, shrinkage, and interaction depth - to 50, 3, 0.1 respectively. And run the caret train (http://www.insider.org/packages/cran/caret/docs/train) and predict methods:
+
+```{r message=FALSE}
+traindf$cluster <- as.factor(traindf$cluster) #GBM requires label to be a factor so it gets measures as a probability 
+#and not a root mean square error
+fitControl <- trainControl(method="none") 
+model <- train(cluster~., data=traindf, tuneGrid = expand.grid(n.trees = 50, interaction.depth = 3, 
+                            shrinkage = 0.1, n.minobsinnode=10), trControl=fitControl, method="gbm", metric='roc')
+```
+
+```{r}
+testdf$cluster <- as.factor(testdf$cluster) 
+predictions <- predict(object=model, testdf[,setdiff(names(testdf), 'cluster')], type='raw')
+```
+
+We use carets **postResample** function to get an accuracy score. A quick note on the predictions. If you do a head on predictions:
+
+```{r}
+head(predictions)
+```
+
+You will notice that it returns actual predictions (i.e. actual cluster values) instead of probabilities - to get probabilities, use the ‘type=prob’ instead of ‘type=raw’.
+
+```{r}
+print(postResample(pred=predictions, obs=testdf$cluster))
+```
+
+Not bad, 94.86% accuracy. Now, let’s see how close we can get there without thousands of features!! 
+
+#### With PCA
+
+Lets reduce the data set using PCA and compare results. As mentioned previously, scaling is important, so we scale the entire data set (not the outcome - cluster) then run the prcomp function. Warning: this step is slow.
+
+```{r}
+# this will take a while - be patient - perhaps 1 hour+
+pmatrix <- scale(gisette_nzv) 
+princ <- prcomp(pmatrix)
+```
+
+So, lets extract a data set containing only the ﬁrst principal component analysis (and we will keep adding till we get the performance we seek):
+
+```{r}
+n.comp <- 1  # numner of principal components
+dfComponents <- predict(princ, newdata=pmatrix)[,1:n.comp] #predict using the 1st and most influential component
+ 
+gisette_df <- cbind(as.data.frame(dfComponents), cluster=g_labels$V1)
+```
+
+To recap, we have a new data set called gisette_df containing only two columns: dfComponents, and cluster (i.e. PCA component 1 and the outcome variable):
+
+```{r}
+head(gisette_df)
+```
+
+Lets get the accuracy on this data set:
+
+```{r}
+# split data set into training and testing 
+set.seed(1234) 
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df))) 
+traindf <- gisette_df[split,] 
+testdf <-  gisette_df[-split,] 
+ 
+# force the outcome  
+traindf$cluster <- as.factor(traindf$cluster) 
+fitControl <- trainControl(method="none") 
+model <- train(cluster~., data=traindf, 
+tuneGrid = expand.grid(n.trees = 50, interaction.depth = 3, shrinkage = 0.1, n.minobsinnode=10), trControl=fitControl, method="gbm", metric='roc')
+```
+
+```{r}
+testdf$cluster <- as.factor(testdf$cluster ) 
+ 
+# note: here you need to force our single variable data set 'testdf' to a data frame, ot herwise R tries to turn it into a vector 
+predictions <- predict(object=model, newdata=data.frame('dfComponents'=testdf[,setdiff(names(testdf), 'cluster')]), type='raw') 
+ 
+print(postResample(pred=predictions, obs=testdf$cluster))
+```
+
+Ouch, our accuracy is only 71.20% but keep in mind that its done with only one variable!! Lets try two PCA components:
+```{r}
+n.comp <- 2  
+dfComponents <- predict(princ, newdata=pmatrix)[,1:n.comp] 
+ 
+gisette_df <- cbind(as.data.frame(dfComponents), cluster=g_labels$V1) 
+ 
+# split data set into training and testing 
+set.seed(1234) 
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df))) 
+traindf <- gisette_df[split,] 
+testdf <-  gisette_df[-split,] 
+ 
+# force the outcome  
+traindf$cluster <- as.factor(traindf$cluster ) 
+fitControl <- trainControl(method="none") 
+model <- train(cluster~., data=traindf, tuneGrid = expand.grid(n.trees = 50, interaction.depth = 3, 
+        shrinkage = 0.1, n.minobsinnode=10), trControl=fitControl, method="gbm", metric='roc')
+```
+
+```{r}
+testdf$cluster <- as.factor(testdf$cluster ) 
+predictions <- predict(object=model, newdata=testdf[,setdiff(names(testdf), 'cluster')], type='raw') 
+ 
+print(postResample(pred=predictions, obs=testdf$cluster))
+```
+
+So, 71.76%, as you can see, for this particular data set, one PCA variable isn’t enough and we have to add more. Let’s try 10! Note that dfComponents will take a little longer to be built:
+
+```{r}
+n.comp <- 10 
+dfComponents <- predict(princ, newdata=pmatrix)[,1:n.comp] 
+ 
+gisette_df <- cbind(as.data.frame(dfComponents), cluster=g_labels$V1) 
+ 
+# split data set into training and testing 
+set.seed(1234) 
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df))) 
+traindf <- gisette_df[split,] 
+testdf <-  gisette_df[-split,] 
+ 
+# force the outcome  
+traindf$cluster <- as.factor(traindf$cluster ) 
+fitControl <- trainControl(method="none") 
+model <- train(cluster~., data=traindf, tuneGrid = expand.grid(n.trees = 50, interaction.depth = 3, 
+        shrinkage = 0.1, n.minobsinnode=10), trControl=fitControl, method="gbm", metric='roc')
+```
+
+```{r}
+testdf$cluster <- as.factor(testdf$cluster ) 
+predictions <- predict(object=model, newdata=testdf[,setdiff(names(testdf), 'cluster')], type='raw') 
+ 
+print(postResample(pred=predictions, obs=testdf$cluster))
+```
+
+Whoa!! 92.73% accuracy!! Not bad going from a 4500+ feature data set down to one with only 10. So, let’s try 20, see where that takes us:
+
+```{r}
+n.comp <- 20 
+dfComponents <- predict(princ, newdata=pmatrix)[,1:n.comp] 
+ 
+gisette_df <- cbind(as.data.frame(dfComponents), cluster=g_labels$V1) 
+ 
+# split data set into training and testing 
+set.seed(1234) 
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df))) 
+traindf <- gisette_df[split,] 
+testdf <-  gisette_df[-split,] 
+ 
+# force the outcome  
+traindf$cluster <- as.factor(traindf$cluster) 
+fitControl <- trainControl(method="none") 
+model <- train(cluster~., data=traindf, tuneGrid = expand.grid(n.trees = 50, interaction.depth = 3, 
+        shrinkage = 0.1, n.minobsinnode=10), trControl=fitControl, method="gbm", metric='roc')
+```
+
+```{r}
+testdf$cluster <- as.factor(testdf$cluster ) 
+predictions <- predict(object=model, newdata=testdf[,setdiff(names(testdf), 'cluster')], type='raw') 
+ 
+print(postResample(pred=predictions, obs=testdf$cluster))
+```
+
+93.10%!! Recall that the full data set gave us an accuracy of 94.86% so we’re almost there! The ﬁrst PCA is the best and it slowly goes down from there. I’ll let you keep trying by adding additional columns and seeing if/how it aﬀects the accuracy at predicting the cluster outcome (but I’ll give you a hint, the climb gets steep from here, adding 50 components, only yields a 0.03% improvement). 
+
+A few notes:
+
+- PCA data is not very useful.  The values transformed by PCA cannot be interpretted (outside of the biplot)
+     - If you need to explain interactions and coefficients, consider other methods like **varible selection**
+
+
+### Example 6 - A Complete Project - 2
+
+Copied from https://www.analyticsvidhya.com/blog/2016/03/practical-guide-principal-component-analysis-python/
+
+PCA can be applied only on numerical data. Therefore, if the data has categorical variables they must be converted to numerical. Also, make sure you have done the basic data cleaning prior to implementing this technique. Let’s quickly finish with initial data loading and cleaning steps:
+```{r}
+#load train and test file
+train <- read.csv("./data/train_BigMart.csv")
+test <- read.csv("./data/test_BigMart.csv")
+#add a column
+test$Item_Outlet_Sales <- 1
+#combine the data set
+combi <- rbind(train, test)
+#impute missing values with median
+combi$Item_Weight[is.na(combi$Item_Weight)] <- median(combi$Item_Weight, na.rm = TRUE)
+#impute 0 with median
+combi$Item_Visibility <- ifelse(combi$Item_Visibility == 0, median(combi$Item_Visibility), combi$Item_Visibility)
+#find mode and impute
+table(combi$Outlet_Size, combi$Outlet_Type)
+levels(combi$Outlet_Size)[1] <- "Other"
+```
+Till here, we have imputed missing values. Now we are left with removing the dependent (response) variable and other identifier variables (if any). As we said above, we are practicing an unsupervised learning technique, hence response variable must be removed.
+
+```{r}
+#remove the dependent and identifier variables
+my_data <- subset(combi, select = -c(Item_Outlet_Sales, Item_Identifier,  Outlet_Identifier))
+```
+Let’s check the available variables ( a.k.a predictors) in the data set.
+```{r}
+#check available variables
+colnames(my_data)
+```
+Since PCA works on numeric variables, let’s see if we have any variable other than numeric.
+```{r}
+#check variable class
+str(my_data)
+```
+
+Sadly, 6 out of 9 variables are categorical in nature. We have some additional work to do now. We’ll convert these categorical variables into numeric using one hot encoding.
+```{r}
+#load library
+library(dummies)
+#create a dummy data frame
+new_my_data <- dummy.data.frame(my_data, names = c("Item_Fat_Content","Item_Type", "Outlet_Establishment_Year","Outlet_Size",
+"Outlet_Location_Type","Outlet_Type"))
+```
+
+To check, if we now have a data set of integer values, simple write:
+```{r}
+str(new_my_data)
+```
+And, we now have all the numerical values. Let’s divide the data into test and train.
+```{r}
+#divide the new data
+pca.train <- new_my_data[1:nrow(train),]
+pca.test <- new_my_data[-(1:nrow(train)),]
+```
+We can now go ahead with PCA.
+
+The base R function prcomp() is used to perform PCA. By default, it centers the variable to have mean equals to zero. With parameter scale. = T, we normalize the variables to have standard deviation equals to 1.
+
+```{r}
+#principal component analysis
+prin_comp <- prcomp(pca.train, scale. = T)
+names(prin_comp)
+```
+The prcomp() function results in 5 useful measures:
+
+1. center and scale refers to respective mean and standard deviation of the variables that are used for normalization prior to implementing PCA
+```{r}
+#outputs the mean of variables
+prin_comp$center
+#outputs the standard deviation of variables
+prin_comp$scale
+```
+
+2. The rotation measure provides the principal component loading. Each column of rotation matrix contains the principal component loading vector. This is the most important measure we should be interested in.
+
+```{r}
+prin_comp$rotation[1:2]
+```
+This returns 44 principal components loadings. Is that correct ? Absolutely. In a data set, the maximum number of principal component loadings is a minimum of (n-1, p). Let’s look at first 4 principal components and first 5 rows.
+
+```{r}
+prin_comp$rotation[1:5,1:4]
+```
+
+3. In order to compute the principal component score vector, we don’t need to multiply the loading with data. Rather, the matrix x has the principal component score vectors in a 8523 × 44 dimension.
+
+```{r}
+dim(prin_comp$x)
+```
+
+Let’s plot the resultant principal components.
+```{r}
+biplot(prin_comp, scale = 0)
+```
+
+The parameter scale = 0 ensures that arrows are scaled to represent the loadings. To make inference from image above, focus on the extreme ends (top, bottom, left, right) of this graph.
+
+We infer than first principal component corresponds to a measure of Outlet_TypeSupermarket, Outlet_Establishment_Year 2007. Similarly, it can be said that the second component corresponds to a measure of Outlet_Location_TypeTier1, Outlet_Sizeother. For exact measure of a variable in a component, you should look at rotation matrix(above) again.
+
+4. The prcomp() function also provides the facility to compute standard deviation of each principal component. sdev refers to the standard deviation of principal components.
+```{r}
+#compute standard deviation of each principal component
+std_dev <- prin_comp$sdev
+#compute variance
+pr_var <- std_dev^2
+#check variance of first 10 components
+pr_var[1:10]
+```
+
+We aim to find the components which explain the maximum variance. This is because, we want to retain as much information as possible using these components. So, higher is the explained variance, higher will be the information contained in those components.
+
+To compute the proportion of variance explained by each component, we simply divide the variance by sum of total variance. This results in:
+
+```{r}
+#proportion of variance explained
+prop_varex <- pr_var/sum(pr_var)
+prop_varex[1:20]
+```
+
+This shows that first principal component explains 10.3% variance. Second component explains 7.3% variance. Third component explains 6.2% variance and so on. So, how do we decide how many components should we select for modeling stage ?
+
+The answer to this question is provided by a scree plot. A scree plot is used to access components or factors which explains the most of variability in the data. It represents values in descending order.
+
+```{r}
+#scree plot
+plot(prop_varex, xlab = "Principal Component",
+ylab = "Proportion of Variance Explained", type = "b")
+```
+
+The plot above shows that ~ 30 components explains around 98.4% variance in the data set. In order words, using PCA we have reduced 44 predictors to 30 without compromising on explained variance. This is the power of PCA> Let’s do a confirmation check, by plotting a cumulative variance plot. This will give us a clear picture of number of components.
+
+```{r}
+#cumulative scree plot
+plot(cumsum(prop_varex), xlab = "Principal Component",
+ylab = "Cumulative Proportion of Variance Explained", type = "b")
+```
+
+This plot shows that 30 components results in variance close to ~ 98%. Therefore, in this case, we’ll select number of components as 30 [PC1 to PC30] and proceed to the modeling stage. This completes the steps to implement PCA on train data. For modeling, we’ll use these 30 components as predictor variables and follow the normal procedures.
+
+#### Predictive Modeling with PCA Components
+
+After we have calculated the principal components on training set, lets now understand the process of predicting on test data using these components. The process is simple. Just like we obtained PCA components on training set, we’ll get another bunch of components on testing set. Finally, we train the model.
+
+But, few important points to understand:
+
+- We should not combine the train and test set to obtain PCA components of whole data at once. Because, this would violate the entire assumption of generalization since test data would get ‘leaked’ into the training set. In other words, the test data set would no longer remain ‘unseen’. Eventually, this will hammer down the generalization capability of the model.
+- We should not perform PCA on test and train data sets separately. Because, the resultant vectors from train and test PCAs will have different directions ( due to unequal variance). Due to this, we’ll end up comparing data registered on different axes. Therefore, the resulting vectors from train and test data should have same axes.
+
+So, what should we do?
+
+We should do exactly the same transformation to the test set as we did to training set, including the center and scaling feature. 
+
+```{r}
+#add a training set with principal components
+train.data <- data.frame(Item_Outlet_Sales = train$Item_Outlet_Sales, prin_comp$x)
+#we are interested in first 30 PCAs
+train.data <- train.data[,1:31]
+#run a decision tree
+rpart.model <- rpart(Item_Outlet_Sales ~ .,data = train.data, method = "anova")
+rpart.model
+#transform test into PCA
+test.data <- predict(prin_comp, newdata = pca.test)
+test.data <- as.data.frame(test.data)
+#select the first 30 components
+test.data <- test.data[,1:30]
+#make prediction on test data
+rpart.prediction <- predict(rpart.model, test.data)
+```
+
+### Points to Remember
+
+- PCA is used to overcome features redundancy in a data set.
+- These features are low dimensional in nature.
+- These features a.k.a components are a resultant of normalized linear combination of original predictor variables.
+- These components aim to capture as much information as possible with high explained variance.
+- The first component has the highest variance followed by second, third and so on.
+- The components must be uncorrelated (remember orthogonal direction? ). See above.
+- Normalizing data becomes extremely important when the predictors are measured in different units.
+- PCA works best on data set having 3 or higher dimensions. Because, with higher dimensions, it becomes increasingly difficult to make interpretations from the resultant cloud of data.
+- PCA is applied on a data set with numeric variables.
+- PCA is a tool which helps to produce better visualizations of high dimensional data.

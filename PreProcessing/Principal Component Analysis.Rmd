@@ -1,0 +1,271 @@
+---
+title: "Principal Component Analysis"
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+header-includes: \usepackage{graphicx} \usepackage{mathtools}
+---
+```{r echo=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "ggbiplot", "ggplot2", "gridExtra", "reshape2", prompt = FALSE)
+#Run Once
+#install_github("ggbiplot","vqv")
+#library(ggbiplot)
+```
+
+## Principal Component Analysis (PCA)
+In this document, we are going to see how to analyse multivariate data set using principal component analysis, in short PCA. I am not going to explain match behind PCA, instead, how to achieve it using R. Intention of the tutorial is, taking 2 datasets, USArrests & iris, apply PCA on them. In fact, both data sets do not have lot of variables to demonstrate dimension reduction in grand way. Still those data sets are good enough to understand how PCA works. 
+
+Before jumping into PCA logic in R, I am going to define a common function which is required to display all PCA related plots in 2X2 grid.
+```{r}
+pcaCharts <- function(x) {
+    x.var <- x$sdev ^ 2
+    x.pvar <- x.var/sum(x.var)
+    print("proportions of variance:")
+    print(x.pvar)
+    
+    par(mfrow=c(2,2))
+    plot(x.pvar,xlab="Principal component", ylab="Proportion of variance explained", ylim=c(0,1), type='b')
+    plot(cumsum(x.pvar),xlab="Principal component", ylab="Cumulative Proportion of variance explained", ylim=c(0,1), type='b')
+    screeplot(x)
+    screeplot(x,type="l")
+    par(mfrow=c(1,1))
+}
+```
+
+## Analyzing USArrests dataset
+It is mandatory that data should be scaled and centered. Centering and scaling can be applied first before calling PCA R functions or PCA function (prcomp) itself has center and scale parameter. In this excercise, we are going to use prcomp parameter for preprocessing. 
+
+italic centering: Scaling italic
+
+USArrests data sets comes with basic dataset with 4 variables. Using PCA, we are going to find linear combinations of the variables that maxmimal variance and mutually uncorrelated.
+```{r}
+head(USArrests)
+```
+
+Applying PCA using R function
+```{r}
+arrests.pca <- prcomp(USArrests,center = TRUE,scale. = TRUE)
+#Checking output of pca. prcomp function returns standard deviation (sdev), rotation and loadings.
+names(arrests.pca)
+```
+
+Above pca output returns 4 principal components as rotation. Basically number of principal components in rotation is equal to number variables in the dataset.
+
+Next step is to identify coverage of variance in dataset by individual principal components. summary() function can be used or scree plot can be used to explain the variance.
+```{r}
+summary(arrests.pca)
+```
+
+From the the summary, we can undersand PC1 explains 62% of variance and PC2 explains 24% so on. Usually Principal components which explains about 95% variance can be considered for models. Summary also yields cumulative proportion of the principal components.
+
+Best thing is, plot PCA using various types of scree plot. Above declared ‘pcaCharts’ function invokes various forms of scree plot
+```{r}
+pcaCharts(arrests.pca)
+```
+
+Next, biplot illustrate the use of PCA on the USArrests data sets.
+```{r}
+biplot(arrests.pca,scale=0, cex=.7)
+```
+
+It seems PCA output concentrated more on negative side. Following set of R code will flip the numbers
+```{r}
+pca.out <- arrests.pca
+pca.out$rotation <- -pca.out$rotation
+pca.out$x <- -pca.out$x
+biplot(pca.out,scale=0, cex=.7)
+```
+
+Interpretation of biplot : For each of 50 stats in the USA, the data set contains the number of arrests per 100,000 residents for each three crimes: Assault, Murder and Rape. Also urbanpop represents percent of the population in each state living in urban areas. The plot shows the first two principal component scores and the loading verctors in a singple biplot display.
+
+The loadings are given below:
+```{r}
+pca.out$rotation[,1:2]
+```
+
+From the plot as wells from the above loadings what we can understand is, first loading vector places approximately equal weight on Assault, Murder and Rape, with much less weight on urbanpop. Hence this component roughly corresponds to a measure of overall rates of serious crimes.
+
+The second loading vector places most of it weight on Urbanpop and much less weight on the other 3 features. Hence, this component roughly corresponds to the level of urbanization of the state. Overall, we see that the crime-related varaibales are located close to each other, and that the urbanpop variable is far from other three. This indicates hat the crime related variables are correlated with each other-States with high murder rates tend to had high assault and rape rates. Urabnpop variable is less correlated with the other three.
+
+There is package called ‘ggbiplot’ available in github which yields much better illustration on PCA.
+```{r warning=FALSE, message=FALSE}
+g <- ggbiplot(pca.out, obs.scale = 1, var.scale = 1, labels=row.names(USArrests), ellipse = TRUE, circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', legend.position = 'top')
+print(g)
+```
+
+## Analyzing iris dataset
+
+Iris data set has 4 contineous variables, describe species characteristics and one categorical variable to represent species. Iris dataset has 150 observations
+```{r}
+head(iris)
+
+str(iris)
+```
+
+PCA is an unsupervised learning. Species-categorical does not need to be included for pca analysis. Rest of the variables can be used for pca analysis.
+```{r}
+iris.cntn <- iris[,-5]
+iris.cat <- iris[,5]
+```
+Next step is, applying preprocessing from caret. Preprocessing involves centering, scaling and skewness removal. caret package is used for preprocessing.
+```{r warning=FALSE, message=FALSE}
+iris.trans <- preProcess(x = iris.cntn,method = c("BoxCox","center","scale"))
+iris.trans
+
+iris.preproc <- predict(iris.trans,newdata = iris.cntn)
+```
+
+Let us apply PCA on transformed iris dataset
+```{r}
+iris.pca <- prcomp(iris.preproc,center = FALSE)
+iris.pca
+
+summary(iris.pca)
+
+pcaCharts(iris.pca)
+```
+
+PC1 and PC2 cover 95% of variability in the data. PCA charts also confirms that (Look for elbow shape)
+
+Next, we will go with biplot to see what goes with each principal component.
+```{r}
+#Switching off scale factors (var.scale and scale variables)
+g <- ggbiplot(iris.pca,scale = 0, var.scale = 0, labels=iris.cat,groups = iris.cat, ellipse = TRUE, circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', legend.position = 'top')
+print(g)
+```
+
+## Computing the Principal Components (PC) 
+
+http://www.r-bloggers.com/computing-and-visualizing-pca-in-r/  
+
+There are many packages and functions that can apply PCA in R. In this post I will use the function prcomp from the stats package. I will also show how to visualize PCA in R using Base R graphics. However, my favorite visualization function for PCA is ggbiplot, which is implemented by Vince Q. Vu and available on github. Please, let me know if you have better ways to visualize PCA in R.
+
+I will use the classical iris dataset for the demonstration. The data contain four continuous variables which corresponds to physical measures of flowers and a categorical variable describing the flowers’ species.
+```{r}
+# Load data
+data(iris)
+head(iris, 3)
+```
+We will apply PCA to the four continuous variables and use the categorical variable to visualize the PCs later. Notice that in the following code we apply a log transformation to the continuous variables as suggested by [1] and set center and scale. equal to TRUE in the call to prcomp to standardize the variables prior to the application of PCA:
+```{r}
+ # log transform 
+log.ir <- log(iris[, 1:4])
+ir.species <- iris[, 5]
+ 
+# apply PCA - scale. = TRUE is highly 
+# advisable, but default is FALSE. 
+ir.pca <- prcomp(log.ir, center = TRUE, scale. = TRUE) 
+``` 
+Since skewness and the magnitude of the variables influence the resulting PCs, it is good practice to apply skewness transformation, center and scale the variables prior to the application of PCA. In the example above, we applied a log transformation to the variables but we could have been more general and applied a Box and Cox transformation [2]. See at the end of this post how to perform all those transformations and then apply PCA with only one call to the **preProcess function of the caret package.**
+
+### Analyzing the results 
+
+The prcomp function returns an object of class prcomp, which have some methods available. The print method returns the standard deviation of each of the four PCs, and their rotation (or loadings), which are the coefficients of the linear combinations of the continuous variables.
+```{r}
+# print method
+print(ir.pca)
+```
+
+The plot method returns a plot of the variances (y-axis) associated with the PCs (x-axis). The Figure below is useful to decide how many PCs to retain for further analysis. In this simple case with only 4 PCs this is not a hard task and we can see that the first two PCs explain most of the variability in the data.
+```{r}
+# plot method
+plot(ir.pca, type = "l")
+```   
+
+The summary method describe the importance of the PCs. The first row describe again the standard deviation associated with each PC. The second row shows the proportion of the variance in the data explained by each component while the third row describe the cumulative proportion of explained variance. We can see there that the first two PCs accounts for more than {95\%} of the variance of the data.
+```{r}
+# summary method
+summary(ir.pca)
+```
+We can use the predict function if we observe new data and want to predict their PCs values. Just for illustration pretend the last two rows of the iris data has just arrived and we want to see what is their PCs values:
+```{r}
+# Predict PCs
+predict(ir.pca, newdata=tail(log.ir, 2))
+```
+
+The Figure below is a biplot generated by the function ggbiplot of the ggbiplot package available on github.
+```{r}
+g <- ggbiplot(ir.pca, obs.scale = 1, var.scale = 1, groups = ir.species, ellipse = TRUE, circle = TRUE)
+g <- g + scale_color_discrete(name = '')
+g <- g + theme(legend.direction = 'horizontal', legend.position = 'top')
+print(g)
+```
+
+It projects the data on the first two PCs. Other PCs can be chosen through the argument choices of the function. It colors each point according to the flowers’ species and draws a Normal contour line with ellipse.prob probability (default to {68\%}) for each group. More info about ggbiplot can be obtained by the usual ?ggbiplot. I think you will agree that the plot produced by ggbiplot is much better than the one produced by biplot(ir.pca)
+```{r}
+biplot(ir.pca)
+```
+
+I also like to plot each variables coefficients inside a unit circle to get insight on a possible interpretation for PCs. Figure 4 was generated by this code.
+```{r}
+theta <- seq(0,2*pi,length.out = 100)
+circle <- data.frame(x = cos(theta), y = sin(theta))
+p <- ggplot(circle,aes(x,y)) + geom_path()
+
+loadings <- data.frame(ir.pca$rotation, .names = row.names(ir.pca$rotation))
+p + geom_text(data=loadings, mapping=aes(x = PC1, y = PC2, label = .names, colour = .names)) +
+     coord_fixed(ratio=1) + labs(x = "PC1", y = "PC2")
+```
+
+### PCA in caret package 
+
+As I mentioned before, it is possible to first apply a Box-Cox transformation to correct for skewness, center and scale each variable and then apply PCA in one call to the preProcess function of the caret package.
+```{r}
+
+trans = preProcess(iris[,1:4], method=c("BoxCox", "center", "scale", "pca"))
+PC = predict(trans, iris[,1:4])
+``` 
+By default, the function keeps only the PCs that are necessary to explain at least 95% of the variability in the data, but this can be changed through the argument thresh.
+```{r}
+# Retained PCs
+head(PC, 3)
+ 
+# Loadings
+trans$rotation
+```
+See Unsupervised data pre-processing for predictive modeling for an introduction of the preProcess function below.
+
+I just got the excellent book Applied Predictive Modeling, by Max Kuhn and Kjell Johnson [1]. The book is designed for a broad audience and focus on the construction and application of predictive models. Besides going through the necessary theory in a not-so-technical way, the book provides R code at the end of each chapter. This enables the reader to replicate the techniques described in the book, which is nice. Most of such techniques can be applied through calls to functions from the caret package, which is a very convenient package to have around when doing predictive modeling.
+
+Chapter 3 is about unsupervised techniques for pre-processing your data. The pre-processing step happens before you start building your model. Inadequate data pre-processing is pointed on the book as one of the common reasons on why some predictive models fail. Unsupervised means that the transformations you perform on your predictors (covariates) does not use information about the response variable.
+
+## Feature engineering 
+
+How your predictors are encoded can have a significant impact on model performance. For example, the ratio of two predictors may be more effective than using two independent predictors. This will depend on the model used as well as on the particularities of the phenomenon you want to predict. The manufacturing of predictors to improve prediction performance is called feature engineering. To succeed at this stage you should have a deep understanding of the problem you are trying to model.
+
+### Data transformations for individuals predictors 
+
+A good practice is to center, scale and apply skewness transformations for each of the individual predictors. This practice gives more stability for numerical algorithms used later in the fitting of different models as well as improve the predictive ability of some models. Box and Cox transformation [2], centering and scaling can be applied using the preProcess function from caret. Assume we have a predictors data frame with two predictors, x1 and x2, depicted in Figure 1.
+
+
+```{r}
+set.seed(1)
+predictors = data.frame(x1 = rnorm(1000, mean = 5, sd = 2), x2 = rexp(1000, rate=10))
+
+p1 = ggplot(predictors) + geom_point(aes(x = x1, y = x2))
+
+temp <- melt(predictors, measured = c("x1", "x2"))
+p2 = ggplot(temp) + geom_histogram(aes(x=value)) + facet_grid(. ~ variable, scales = "free_x")
+
+grid.arrange(p1, p2)
+
+trans <- preProcess(predictors, c("BoxCox", "center", "scale"))
+predictors_trans <- data.frame(trans = predict(trans, predictors))
+
+p1 = ggplot(predictors_trans) + geom_point(aes(x = trans.x1, y = trans.x2))
+temp <- melt(predictors_trans, measured = c("trans.x1", "trans.x2"))
+p2 = ggplot(temp) + geom_histogram(aes(x=value), data = temp) + facet_grid(. ~ variable, scales = "free_x")
+grid.arrange(p1, p2)
+```
+
+##Reference:  
+
+https://rpubs.com/njvijay/27823

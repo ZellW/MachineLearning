@@ -1,0 +1,495 @@
+---
+title: "One Hot Encoding"
+output: html_document
+---
+
+##Introduction
+
+https://www.stat.berkeley.edu/classes/s133/factors.html
+http://www.win-vector.com/blog/2016/11/you-should-re-encode-high-cardinality-categorical-variables/
+
+*Is it bad to include categorical data to create machine learning models?  Answer: maybe, it depends on the model.*
+
+First, do you know what a categorical variable is?  It's easy - a categorical variable is a non-numerical variable.  In R we call categorical variables *factors*.  Here's a quick example:
+
+```{r}
+directions <- c("North", "East", "South", "South")
+class(directions)
+```
+Let's change this to a factor:
+```{r}
+directions.factor <- factor(directions)
+class(directions.factor)
+directions.factor
+```
+
+OK, that's a really simple example, but what if the problem is more complex?
+
+What if we have a predictor that is a date. Do we encode that as the day or the year (1 to 365) and include it as a numeric predictor? We could also add in predictors for the day of the week, the month, the season etc. There are a lot of options. This question of feature engineering is important. You want to find the encoding that captures the important patterns in the data. If there is a seasonal effect, the encoding should capture that information. Exploratory visualizations (perhaps with lattice or ggplot2) can go a long way to figuring out good ways to represent these data. 
+
+Simple enough, right? Maybe not. If we need a numeric encoding here, what do we do? 
+
+###Let's learn with an example.  Again, we'll use a easy example then walk through a more comprehesive exercise.
+
+####A simple exercise
+
+Let's create some data and see it's structure:
+```{r}
+myData <- data.frame("ID" = c(1, 2, 3, 4, 5), "myVar1" = c("A", "A", "B", "C", "A"), 
+           "myVar2" = c(sample(10:100, 5, replace = FALSE)))
+str(myData)
+```
+Notice the myVar1 - it is a factor with 3 levels consisting of A, B & C.  We also learn that A is repsented by 1, B is represetned by 2 and C is represented by 3.  R has autimatically created factoirs fronm the strings we entered when we created the data frame.  How helpful (at least in this case)!   
+
+Many machine learning algorithms require numbers as inputs, so if your categorical variable takes on values like "A", "B", and "C", then you need to code it as numbers in some way. Dummy variables provide a way to do this.
+
+You can also handle this when reading in your data. See the colClasses and stringsAsFactors parameters in e.g. readCSV().
+
+####A more realistic exercise
+
+```{r message=FALSE, warning=FALSE}
+if(!require(vcd) | !require(Matrix)){install.packages(c(vcd, Matrix))}
+library(data.table)
+data(Arthritis)
+df <- data.table(Arthritis, keep.rownames = F)
+head(df)
+```
+
+Now we will check the format of each column.
+```{r}
+str(df)
+```
+
+2 columns have factor type, one has ordinal type.
+
+Ordinal variable :
+
+- can take a limited number of values (like factor) ;
+- these values are ordered (unlike factor). Here these ordered values are: Marked > Some > None
+
+####Creation of new features based on old ones
+
+We will add some new categorical features to see if it helps.  First, try grouping by 10 years.  We create groups of age by rounding the real age.  Note that we transform it to factor so the algorithm treat these age groups as independent values.
+
+```{r}
+head(df[,AgeDiscret := as.factor(round(Age/10,0))])
+```
+
+Random split into two groups with an arbitrary split at 30 years old.
+
+```{r}
+head(df[,AgeCat:= as.factor(ifelse(Age > 30, "Old", "Young"))])
+```
+
+##Risks in adding correlated features
+
+These new features are highly correlated to the Age feature because they are simple transformations of this feature.
+
+For many machine learning algorithms, using correlated features is not a good idea. It may sometimes make prediction less accurate, and most of the time make interpretation of the model almost impossible. GLM, for instance, assumes that the features are uncorrelated. Decision tree algorithms (including boosted trees) are very robust to these features. Therefore we have nothing to do to manage this situation.
+
+####Cleaning data
+
+We remove ID as there is nothing to learn from this feature (it would just add some noise).
+```{r}
+df[, ID:=NULL]
+```
+
+We will list the different values for the column Treatment:
+```{r}
+levels(df[, Treatment])
+```
+
+####One-hot encoding
+
+Next step, we will transform the categorical data to dummy variables. This is the one-hot encoding step.  The purpose is to transform each value of each categorical feature into a binary feature {0, 1}.
+
+For example, the column Treatment will be replaced by two columns, Placebo, and Treated. Each of them will be binary. Therefore, an observation which has the value Placebo in column Treatment before the transformation will have after the transformation the value 1 in the new column Placebo and the value 0 in the new column Treated. The column Treatment will disappear during the one-hot encoding.
+
+Column Improved is excluded because it will be our label column - the one we want to predict.
+
+```{r}
+sparse_matrix <- sparse.model.matrix(Improved~.-1, data = df)
+head(sparse_matrix)
+```
+
+`Formulae Improved~.-1` used above means transform all categorical features but column Improved to binary values. The -1 is here to remove the first column which is full of 1 (this column is generated by the conversion). For more information, you can type ?sparse.model.matrix in the console.
+
+Great site to learn from:  https://github.com/WinVector
+
+Xgboost and one hot encoding:  
+- https://cran.r-project.org/web/packages/xgboost/vignettes/discoverYourData.html
+
+Dummies Package:  https://cran.r-project.org/web/packages/dummy/dummy.pdf
+
+https://community.h2o.ai/questions/1675/need-suggestion-to-handle-categorical-variables-wi.html
+https://www.stat.berkeley.edu/classes/s133/factors.html
+https://www.analyticsvidhya.com/blog/2015/11/easy-methods-deal-categorical-variables-predictive-modeling/
+http://www.win-vector.com/blog/2016/11/you-should-re-encode-high-cardinality-categorical-variables/
+https://cran.r-project.org/web/packages/vtreat/index.html
+https://cran.r-project.org/web/packages/tabplot/vignettes/tabplot-vignette.html
+https://discuss.analyticsvidhya.com/t/how-to-do-one-hot-encoding-in-r/6982/6
+https://www.quora.com/What-is-one-hot-encoding-and-when-is-it-used-in-data-science
+http://amunategui.github.io/dummyVar-Walkthrough/
+http://www.kdnuggets.com/2015/12/beyond-one-hot-exploration-categorical-variables.html
+https://stats.stackexchange.com/questions/95212/improve-classification-with-many-categorical-variables
+https://www.quora.com/Which-machine-learning-algorithms-are-appropriate-for-numerical-categorical-or-both-values
+
+##dummies Package
+
+```{r}
+if(!require(dummies)){install.packages(c(dummies) | !require(ggplot2) | !require(dplyr))}
+
+letters <- c( "a", "a", "b", "c", "d", "e", "f", "g", "h", "b", "b" ) 
+dummy( as.character(letters) ) 
+dummy( letters[1:6] )
+
+l <- as.factor(letters)[ c(1:3,1:6,4:6) ] 
+dummy(l) 
+dummy(l, drop=FALSE) 
+dummy(l, sep=":") 
+dummy(l, sep="::", fun=as.logical)
+
+# TESTING NAS 
+l <- c( NA, l, NA) 
+dummy(l) 
+dummy(l,sep=":")
+
+dummy(iris$Species) 
+dummy(iris$Species[ c(1:3,51:53,101:103) ] ) 
+dummy(iris$Species[ c(1:3,51:53,101:103) ], sep=":" ) 
+dummy(iris$Species[ c(1:3,51:53) ], sep=":", drop=FALSE )
+
+# TESTING TRAP FOR ONE LEVEL 
+dummy( as.factor(letters)[c(1,1,1,1)] ) 
+dummy( as.factor(letters)[c(1,1,2,2)] ) 
+dummy( as.factor(letters)[c(1,1,1,1)] , drop = FALSE )
+
+dummy.data.frame(iris) 
+dummy.data.frame(iris, all=FALSE)
+dummy.data.frame(iris, dummy.class="numeric" ) 
+dummy.data.frame(iris, dummy.class="ALL" )
+```
+
+##One Hot Encoding Example
+
+[R](https://cran.r-project.org) has "one-hot" encoding hidden in most of its modeling paths.  Asking an `R`
+user where one-hot encoding is used is like asking a fish where there is water; they can't point to it as it is everywhere.
+
+For example we can see evidence of one-hot encoding in the variable names chosen by a linear regression:
+
+```{r modelenc}
+dTrain <-  data.frame(x= c('a','b','b', 'c'), y= c(1, 2, 1, 2))
+summary(lm(y~x, data= dTrain))
+```
+
+Much of the encoding in `R` is essentially based on "contrasts" implemented in `stats::model.matrix()` Note: do not use `base::data.matrix()` or use [hashing](http://www.win-vector.com/blog/2014/12/a-comment-on-preparing-data-for-classifiers/) before modeling- you might get away with them (especially with tree based methods), but they are [not in general good technique](http://www.win-vector.com/blog/2014/12/a-comment-on-preparing-data-for-classifiers/) as we show below:
+
+```{r datamatrix}
+data.matrix(dTrain)
+```
+
+`stats::model.matrix()` does not store its one-hot plan in a convenient manner (it can be inferred by pulling the "`contrasts`" attribute plus examining the column names of the first encoding, but the levels identified are not conveniently represented).
+
+When directly applying `stats::model.matrix()` you can not safely assume the same formula applied to two different data sets (say train and application or test) are using the same encoding!  We demonstrate this below:
+
+```{r modelmatrixexample}
+dTrain <- data.frame(x= c('a','b','c'), stringsAsFactors = FALSE)
+encTrain <- stats::model.matrix(~x, dTrain)
+print(encTrain)
+
+dTest <- data.frame(x= c('b','c'), stringsAsFactors = FALSE)
+stats::model.matrix(~x, dTest)
+```
+
+The above mal-coding can be a critical flaw when you are building a model and then later using the model on new data (be it cross-validation data, test data, or future application data).  Many  `R` users are not familiar with the above issue as encoding is hidden in model training, and how to encode new data is stored as part of the model.  `Python` `scikit-learn` users coming to `R` often ask "where is the one-hot encoder" (as it isn't discussed as much in `R` as it is in `scikit-learn`) and even supply a number of (low quality) one-off packages "porting one-hot encoding to `R`."
+
+The main place an `R` user needs a proper encoder (and that is an encoder that stores its encoding plan in a conveniently re-usable form, which many of the "one-off ported from `Python`" packages actually fail to do) is when using a machine learning implementation that isn't completely `R`-centric.   One such system is [`xgboost`](https://github.com/dmlc/xgboost) which requires (as is typical of machine learning in `scikit-learn`) data to already be encoded as a numeric matrix (instead of a heterogeneous structure such as a `data.frame`).  This requires explicit conversion on the part of the `R` user, and many `R` users get it wrong (fail to store the encoding plan somewhere).  To make this concrete let's work a simple example.
+
+Let's try the Titanic data set to see encoding in action.  Note: we are not working hard on this example (as in adding extra variables derived from cabin layout, commonality of names, and other sophisticated feature transforms)- just plugging the obvious variable into `xgboost`.  As we said: `xgboost` requires a numeric matrix for its input, so unlike many `R` modeling methods we must manage the data encoding ourselves (instead of leaving that to `R` which often hides the encoding plan in the trained model).  Also note: differences observed in performance that are below the the sampling noise level should not be considered significant (e.g., all the methods demonstrated here performed about the same).
+
+We bring in our data:
+
+```{r modelingexample, message=FALSE, warning=FALSE}
+# set up example data set
+library("titanic")
+data(titanic_train)
+str(titanic_train)
+summary(titanic_train)
+outcome <- 'Survived'
+target <- 1
+shouldBeCategorical <- c('PassengerId', 'Pclass', 'Parch')
+for(v in shouldBeCategorical) {titanic_train[[v]] <- as.factor(titanic_train[[v]])}
+tooDetailed <- c("Ticket", "Cabin", "Name", "PassengerId")
+vars <- setdiff(colnames(titanic_train), c(outcome, tooDetailed))
+
+dTrain <- titanic_train
+```
+
+And design our cross-validated modeling experiment:
+
+```{r setup, warning=FALSE, message=FALSE}
+library("xgboost")
+library("sigr")
+library("WVPlots")
+library("vtreat")
+
+set.seed(4623762)
+crossValPlan <- vtreat::kWayStratifiedY(nrow(dTrain), 10, dTrain, dTrain[[outcome]])
+
+evaluateModelingProcedure <- function(xMatrix, outcomeV, crossValPlan){
+  preds <- rep(NA_real_, nrow(xMatrix))
+  for(ci in crossValPlan) {
+    nrounds <- 1000
+    cv <- xgb.cv(data= xMatrix[ci$train, ], label= outcomeV[ci$train],
+                 objective= 'binary:logistic', nrounds= nrounds,
+                 verbose= 0, nfold= 5)
+    
+    #nrounds  <- which.min(cv$evaluation_log$test_rmse_mean) # regression
+    nrounds  <- which.min(cv$evaluation_log$test_error_mean) # classification
+    model <- xgboost(data= xMatrix[ci$train, ], label= outcomeV[ci$train],
+                     objective= 'binary:logistic', nrounds= nrounds, verbose= 0)
+    
+    preds[ci$app] <-  predict(model, xMatrix[ci$app, ])
+  }
+  preds
+}
+```
+
+Our preferred way to encode data is to use the [vtreat](https://CRAN.R-project.org/package=vtreat) package in the "no variables mode" shown below (differing from the powerful "y aware" modes we usually teach).
+
+```{r vtreatZ}
+set.seed(4623762)
+tplan <- vtreat::designTreatmentsZ(dTrain, vars, minFraction= 0, verbose=FALSE)
+# restrict to common varaibles types
+# see vignette('vtreatVariableTypes', package = 'vtreat') for details
+sf <- tplan$scoreFrame
+newvars <- sf$varName[sf$code %in% c("lev", "clean", "isBAD")] 
+trainVtreat <- as.matrix(vtreat::prepare(tplan, dTrain, varRestriction = newvars))
+print(dim(trainVtreat))
+print(colnames(trainVtreat))
+dTrain$predVtreatZ <- evaluateModelingProcedure(trainVtreat,  dTrain[[outcome]]==target, crossValPlan)
+sigr::permTestAUC(dTrain, 'predVtreatZ', outcome, target)
+WVPlots::ROCPlot(dTrain, 'predVtreatZ', outcome, target, 'vtreat encoder performance')
+```
+
+Model matrix can perform similar encoding *when* we only have a single data set.
+
+```{r modelmatrix}
+set.seed(4623762)
+f <- paste('~ 0 + ', paste(vars, collapse = ' + '))
+# model matrix skips rows with NAs by default,
+# get control of this through an option
+oldOpt <- getOption('na.action')
+options(na.action='na.pass')
+trainModelMatrix <- stats::model.matrix(as.formula(f), dTrain)
+# note model.matrix does not conveniently store the encoding
+# plan, so you may run into difficulty if you were to encode
+# new data which didn't have all the levels seen in the training
+# data.
+options(na.action=oldOpt)
+print(dim(trainModelMatrix))
+print(colnames(trainModelMatrix))
+
+dTrain$predModelMatrix <- evaluateModelingProcedure(trainModelMatrix, 
+                           dTrain[[outcome]]==target,crossValPlan)
+sigr::permTestAUC(dTrain, 'predModelMatrix', outcome, target)
+WVPlots::ROCPlot(dTrain, 'predModelMatrix', outcome, target, 'model.matrix encoder performance')
+```
+
+The `caret` package also supplies an encoding functionality properly split between training (`caret::dummyVars()`) and application (called `predict()`).
+
+```{r caret, message=FALSE, warning=FALSE}
+library("caret")
+set.seed(4623762)
+f <- paste('~', paste(vars, collapse = ' + '))
+encoder <- caret::dummyVars(as.formula(f), dTrain)
+trainCaret <- predict(encoder, dTrain)
+print(dim(trainCaret))
+print(colnames(trainCaret))
+
+dTrain$predCaret <- evaluateModelingProcedure(trainCaret, dTrain[[outcome]]==target,
+                     crossValPlan)
+sigr::permTestAUC(dTrain, 'predCaret', outcome, target)
+WVPlots::ROCPlot(dTrain, 'predCaret', outcome, target, 'caret encoder performance')
+```
+
+We usually forget to teach `vtreat::designTreatmentsZ()` as it is often dominated by the more powerful y-aware methods `vtreat` supplies (though not for this simple example).
+
+`vtreat::designTreatmentsZ` has a number of useful properties:
+
+  * Does not look at the outcome values, so does not require extra care in cross-validation.
+  * Saves its encoding, so can be used correctly on new data.
+
+The above two properties are shared with `caret::dummyVars()`.  Additional features of `vtreat::designTreatmentsZ` (that differ from `caret::dummyVars()`'s choices) include:
+
+  * No `NA` values are passed through by `vtreat::prepare()`.
+  * `NA` presence is added as an additional informative column.
+  * A few derived columns (such as pooling of rare levels are made available).
+  * Rare dummy variables are pruned (under a user-controlled threshold) to prevent encoding explosion.
+  * Novel levels (levels that occur during test or application, but not during training) are deliberately passed through as "no training level activated" by `vtreat::prepare()` (`caret::dummyVars()` considers this an error).
+  
+The `vtreat` y-aware methods include proper nested modeling and y-aware dimension reduction.
+
+`vtreat` is designed "to always work" (always return a pure numeric data frame with no missing values).  It also excels in "big data" situations where the statistics it can collect on high cardinality categorical variables can have a huge positive impact in modeling performance.  In many cases `vtreat` works around problems that kill the analysis pipeline (such as discovering new variable levels during test or application).  We teach `vtreat` sore of "bimodally" in both a ["fire and forget" mode](http://www.win-vector.com/blog/2017/03/vtreat-prepare-data/) and a ["all the details on deck" mode](https://arxiv.org/abs/1611.09477) (suitable for formal citation).  Either way `vtreat` can make your modeling procedures stronger, more reliable, and easier.
+
+##################
+
+You could also try y-aware encoding, but it isn't adding anything positive in this situation as 
+we have not introduced any high-cardinality categorical variables into this modeling example
+(the main place y-aware encoding helps).
+
+```{r vtreatC}
+set.seed(4623762)
+# for y aware evaluation must cross-validate whole procedure, designing
+# on data you intend to score on can leak information.
+preds <- rep(NA_real_, nrow(dTrain))
+for(ci in crossValPlan) {
+  cfe <- vtreat::mkCrossFrameCExperiment(dTrain[ci$train, , drop=FALSE], minFraction= 0,
+                          vars, outcome, target)
+  tplan <- cfe$treatments
+  sf <- tplan$scoreFrame
+  newvars <- sf$varName[sf$sig < 1/nrow(sf)]
+  trainVtreat <- cfe$crossFrame[ , c(newvars, outcome), drop=FALSE]
+  nrounds <- 1000
+  cv <- xgb.cv(data= as.matrix(trainVtreat[, newvars, drop=FALSE]),
+                   label= trainVtreat[[outcome]]==target, objective= 'binary:logistic',
+                   nrounds= nrounds, verbose= 0, nfold= 5)
+  #nrounds  <- which.min(cv$evaluation_log$test_rmse_mean) # regression
+  nrounds  <- which.min(cv$evaluation_log$test_error_mean) # classification
+  model <- xgboost(data= as.matrix(trainVtreat[, newvars, drop=FALSE]),
+                   label= trainVtreat[[outcome]]==target, objective= 'binary:logistic',
+                   nrounds= nrounds, verbose= 0)
+  appVtreat <- vtreat::prepare(tplan, dTrain[ci$app, , drop=FALSE], varRestriction = newvars)
+  preds[ci$app] <-  predict(model,
+                            as.matrix(appVtreat[, newvars, drop=FALSE]))
+}
+dTrain$predVtreatC <- preds
+sigr::permTestAUC(dTrain, 'predVtreatC', outcome, target)
+WVPlots::ROCPlot(dTrain, 'predVtreatC', outcome, target, 
+                 'vtreat y-aware encoder performance')
+```
+
+```{r}
+require(xgboost)
+require(Matrix)
+require(data.table)
+if (!require(vcd)) {
+  install.packages('vcd') #Available in Cran. Used for its dataset with categorical values.
+  require(vcd)
+}
+```
+
+According to its documentation, Xgboost works only on numbers.
+
+Sometimes the dataset we have to work on have categorical data.
+
+A categorical variable is one which have a fixed number of values. By example, if for each observation a variable called "Colour" can have only "red", "blue" or "green" as value, it is a categorical variable.
+
+In R, categorical variable is called Factor.  Type ?factor in console for more information.
+
+In this demo we will see how to transform a dense dataframe with categorical variables to a sparse matrix before analyzing it in Xgboost.  The method we are going to see is usually called "one hot encoding".
+
+Load Arthritis dataset in memory.
+
+```{r}
+data(Arthritis)
+```
+
+Create a copy of the dataset with `data.table` (data.table is 100% compliant with R dataframe but its syntax is a lot more consistent and its performance are really good).
+
+```{r}
+df <- data.table(Arthritis, keep.rownames = F)
+cat("Print the dataset\n")
+print(df)
+```
+
+2 columns have factor type, one has ordinal type (ordinal variable is a categorical variable with values wich can be ordered, here: None > Some > Marked).
+
+```{r}
+cat("Structure of the dataset\n")
+str(df)
+```
+
+Let's add some new categorical features to see if it helps. Of course these feature are highly correlated to the Age feature. Usually it's not a good thing in ML, but Tree algorithms (including boosted trees) are able to select the best features, even in case of highly correlated features.
+
+For the first feature we create groups of age by rounding the real age. Note that we transform it to factor (categorical data) so the algorithm treat them as independant values.
+
+```{r}
+df[, AgeDiscret:= as.factor(round(Age/10,0))]
+```
+
+Here is an even stronger simplification of the real age with an arbitrary split at 30 years old. I choose this value based on nothing. We will see later if simplifying the information based on arbitrary values is a good strategy (I am sure you already have an idea of how well it will work!).
+
+```{r}
+df[, AgeCat:= as.factor(ifelse(Age > 30, "Old", "Young"))]
+```
+
+We remove ID as there is nothing to learn from this feature (it will just add some noise as the dataset is small).
+
+```{r}
+df[, ID:=NULL]
+```
+
+List the different values for the column Treatment: Placebo, Treated.
+
+```{r}
+cat("Values of the categorical feature Treatment\n")
+print(levels(df[, Treatment]))
+```
+
+Next step, we will transform the categorical data to dummy variables.  This method is also called one hot encoding.  The purpose is to transform each value of each categorical feature in one binary feature.
+
+Let's take, the column Treatment will be replaced by two columns, Placebo, and Treated. Each of them will be binary. For example an observation which had the value Placebo in column Treatment before the transformation will have, after the transformation, the value 1 in the new column Placebo and the value 0 in the new column  Treated.
+
+`Formulae Improved~.-1` used below means transform all categorical features but column Improved to binary values.
+`Column Improved` is excluded because it will be our output column - the one we want to predict.
+
+```{r message=FALSE}
+sparse_matrix = sparse.model.matrix(Improved~.-1, data = df)
+
+cat("Encoding of the sparse Matrix\n")
+print(sparse_matrix)
+```
+
+Create the output vector (not sparse)
+
+1. Set, for all rows, field in Y column to 0; 
+2. set Y to 1 when Improved == Marked; 
+3. Return Y column
+
+```{r}
+output_vector = df[, Y:=0][Improved == "Marked",Y:=1][, Y]
+```
+
+Following is the same process as other demo
+
+```{r}
+cat("Learning...\n")
+bst <- xgboost(data = sparse_matrix, label = output_vector, max_depth = 9,
+               eta = 1, nthread = 2, nrounds = 10, objective = "binary:logistic")
+
+importance <- xgb.importance(feature_names = colnames(sparse_matrix), model = bst)
+print(importance)
+```
+
+According to the matrix below, the most important feature in this dataset to predict if the treatment will work is the `Age`. The second most important feature is having received a placebo or not. The sex is third. Then we see our generated features (AgeDiscret). We can see that their contribution is very low (Gain column).
+
+Does these result make sense?  Let's check some Chi2 between each of these features and the outcome.
+
+```{r message=FALSE}
+print(chisq.test(df$Age, df$Y))
+# Pearson correlation between Age and illness disappearing is 35
+
+print(chisq.test(df$AgeDiscret, df$Y))
+# Our first simplification of Age gives a Pearson correlation of 8.
+
+print(chisq.test(df$AgeCat, df$Y))
+```
+
+The perfectly random split I did between young and old at 30 years old have a low correlation of 2. It's a result we may expect as may be in my mind > 30 years is being old (I am 32 and starting feeling old, this may explain that), but  for the illness we are studying, the age to be vulnerable is not the same. Don't let your "gut" lower the quality of your model. In "data science", there is science :-)
+
+As you can see, in general destroying information by simplifying it won't improve your model. Chi2 just demonstrates that. But in more complex cases, creating a new feature based on existing one which makes link with the outcome more obvious may help the algorithm and improve the model. The case studied here is not enough complex to show that. Check Kaggle forum for some challenging datasets.
+
+However it's almost always worse when you add some arbitrary rules.
+
+Moreover, you can notice that even if we have added some not useful new features highly correlated with other features, the boosting tree algorithm have been able to choose the best one, which in this case is the Age. Linear model may not be that strong in these scenario.

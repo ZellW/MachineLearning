@@ -1,0 +1,119 @@
+http://rbyexamples.blogspot.com/
+
+##Linear regression 
+
+Let's try regression on the auto dataset:
+```{r}
+library(leaps)
+auto<- read.csv('../LinearRegression/data/auto.csv')
+#attach(auto)
+try(regfit.full <- regsubsets(price~., auto), silent = FALSE)
+```
+It doesn't work because by default, exhaustive search is performed.
+This requires lots of permutations, so you have to set really.big=TRUE if you want this.
+
+But let's just make things simpler by carving out a subset of variables:
+```{r}
+autosmall <- auto[,c(2,3,5,6,7,8,9,10,11)]
+regfit.full <- regsubsets(price ~ . , autosmall) # the . indicates we want all variables to be considered.
+summary(regfit.full)
+
+regfit.fwd <- regsubsets(price~., autosmall, method="forward") # forward stepwise selection
+regfit.bwd <- regsubsets(price~., autosmall, method="backward") # backward stepwise selection
+coef(regfit.fwd,3) # gives the coefficients for regfit.fwd for the optimal 3-variable model
+```
+Recall that we actually need to split our dataset into a training set and test set. This is how we can do it:
+```{r}
+set.seed(1)
+train <- sample(c(TRUE, FALSE),nrow(autosmall),rep=TRUE)
+# if we wanted 75% of observations to be in training set, we can do the below:
+# train <- sample(c(TRUE, FALSE),nrow(autosmall),rep=TRUE, prob = c(0.75, 0.25))
+test <- (!train)
+
+# another way of allocating the training/test sets:
+# train <- sample(1:nrow(autosmall),  nrow(autosmall)/2)
+# test <- (-train)
+# autosmall.test <- autosmall[test]
+# (notice that test contains all negative numbers, so all "train" observations are excluded)
+```
+ To keep things simple, we didn't do cross validation (as well as regularization).
+Here's how to do cross-validation:
+```{r}
+regfit.full <- regsubsets(price~., autosmall[train,])
+reg.summary <- summary(regfit.full) # for convenience
+names(reg.summary)
+```
+ For model selection, it'll be useful to plot how RSS (and other measures such as adjusted R-sq) varies with number of variables:
+```{r}
+par(mfrow = c(1,2)) # sets a 1 row by 2 column plot
+plot(reg.summary$rss,xlab="# of Var", ylab="RSS", type="l")
+(m1 <- which.min(reg.summary$rss))
+points(m1,reg.summary$rss[m1], col="red",cex=2,pch=20)
+# cex refers to the dot thickness
+
+plot(reg.summary$adjr2,xlab="# of Var", ylab="Adj R2", type="l")
+(m1 <- which.max(reg.summary$adjr2))
+points(m1,reg.summary$adjr2[m1], col="red",cex=2,pch=20)
+
+plot(regfit.full, scale="r2")
+```
+Now we need to see MSE on the test set. First off, use model.matrix to generate the "X" matrix for the test set:
+```{r}
+test.mat <- model.matrix(price~., data=autosmall[test,])
+
+val.errors = rep(NA,8) # generates the empty MSE matrix
+for (i in 1:8) {
+  coefi <- coef(regfit.full, id=i) # takes the coefficients from the optimal model with i variables
+  pred <- test.mat[,names(coefi)] %*% coefi # generate predicted values of each observation
+  val.errors[i] <- mean((autosmall$price[test] - pred)^2) # generate MSE for i-th model
+}
+val.errors
+#[1]  7781131  9856769 10060398  9574022  9421108  9470527  9269711  8942316
+(v <- which.min(val.errors))
+#[1] 1
+# so we choose model with 1 variable (weight only)
+coef(regfit.full, v)
+#(Intercept)      weight 
+#-426.910662    2.251572
+```
+We can also write a function, which will come in useful for k-fold cross validation
+```{r}
+predict.regsubsets <- function(object, newdata, id, ...) {
+  form <- as.formula(object$call[[2]]) # takes the second item from object$call list
+  # call is part of regfit.full
+  # the second item within the list is the relevant variables
+  mat <- model.matrix(form, newdata) # generates the required X matrix using the formula
+  coefi <- coef(object, id=id) # the X variable COEFFICIENTS of the optimal model
+  xvars <- names(coefi) # these are the X variables of the optimal model
+  mat[,xvars] %*% coefi # generates predicted values (by looking at the relevant columns only)
+}
+
+ # 10-fold cross validation
+k = 10
+set.seed(1)
+folds = sample(1:k, nrow(autosmall), replace=TRUE) 
+# if an observation is labelled 'i', it will be part of the i-th fold.
+# e.g. an observation that is labelled 3 will be left out of the 3rd round of cross validation
+cv.errors = matrix(NA,k,8, dimnames=list(NULL, paste(1:8)))
+# sets up a k by 8 matrix filled with NA's. 
+# columns are named 1 to 8
+
+ # armed with our new predict() method, we can:
+for (j in 1:k) {
+  # obtain the required coefficients
+  best.fit <- regsubsets(price ~ . , data=autosmall[folds != j,])
+  # note: if you have more than 8 variables you will need to specify nvmax in the above command
+  for (i in 1:8) {
+    # now, calculate MSE using the i-th fold
+    pred <- predict(best.fit, autosmall[folds == j,],id=i)
+    # since best.fit is of class regsubsets, the predict command that was created will work on it.
+    cv.errors[j,i] <- mean((autosmall$price[folds == j] - pred)^2)
+  }
+}
+(mean.cv.errors <- apply(cv.errors,2,mean))
+```
+Let's plot MSE of the CV dataset.
+```{r}
+par(mfrow=c(1,1))
+plot(mean.cv.errors, type='b')
+```

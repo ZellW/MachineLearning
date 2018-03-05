@@ -1,0 +1,71 @@
+---
+title: "Analysis of Covariance – Extending Simple Linear Regression"
+output: html_document
+---
+
+The simple linear regression model considers the relationship between two variables and in many cases more information will be available that can be used to extend the model. For example, there might be a categorical variable (sometimes known as a covariate) that can be used to divide the data set to fit a separate linear regression to each of the subsets. We will consider how to handle this extension using one of the data sets available within the R software package.
+
+There is a set of data relating trunk circumference (in mm) to the age of Orange trees where data was recorded for five trees. This data is available in the data frame Orange and we make a copy of this data set so that we can remove the ordering that is recorded for the Tree identifier variable. We create a new factor after converting the old factor to a numeric string:
+```{r}
+orange.df = Orange
+orange.df$Tree = factor(as.numeric(orange.df$Tree))
+```
+The purpose of this step is to set up the variable for use in the linear model. The simplest model assumes that the relationship between circumference and age is the same for all five trees and we fit this model as follows:
+```{r}
+orange.mod1 = lm(circumference ~ age, data = orange.df)
+```
+The summary of the fitted model is shown here:
+```{r}
+summary(orange.mod1)
+```
+
+The test on the age parameter provides very strong evidence of an increase in circumference with age, as would be expected. The next stage is to consider how this model can be extended – one idea is to have a separate intercept for each of the five trees. This new model assumes that the increase in circumference is consistent between the trees but that the growth starts at different rates. We fit this model and get the summary as follows:
+```{r}
+orange.mod2 = lm(circumference ~ age + Tree, data = orange.df)
+summary(orange.mod2)
+``` 
+The additional term is appended to the simple model using the + in the formula part of the call to lm. The first tree is used as the baseline to compare the other four trees against and the model summary shows that tree 2 is similar to tree 1 (no real need for a different offset) but that there is evidence that the offset for the other three trees is significantly larger than tree 1 (and tree 2). We can compare the two models using an F-test for nested models using the anova function:
+```{r}
+anova(orange.mod1, orange.mod2)
+```
+Here there are four degrees of freedom used up by the more complicated model (four parameters for the different trees) and the test comparing the two models is highly significant. There is very strong evidence of a difference in starting circumference (for the data that was collected) between the trees.
+
+We can extended this model further by allowing the rate of increase in circumference to vary between the five trees. This additional term can be included in the linear model as an interaction term, assuming that tree 1 is the baseline. An interaction term is included in the model formula with a : between the name of two variables. For the Orange tree data the new model is fitted thus:
+```{r}
+orange.mod3 = lm(circumference ~ age + Tree + age:Tree, data = orange.df)
+summary(orange.mod3)
+``` 
+Interesting we see that there is strong evidence of a difference in the rate of change in circumference for the five trees. The previously observed difference in intercepts is now longer as strong but this parameter is kept in the model – there are plenty of books/websites that discuss this marginality restrictin on statistical models. The fitted model described above can be created using lattice graphics with a custom panel function making use of available panel functions for fitting and drawing a linear regression line for each panel of a Trellis display. 
+
+The panel.xyplot and panel.lmline functions are part of the lattice package along with many other panel functions and can be built up to create a display that differs from the standard. The graph that is produced:
+```{r}
+library(lattice)
+xyplot(circumference ~ age | Tree, data = orange.df,
+  panel = function(x, y, ...)
+  {
+    panel.xyplot(x, y, ...)
+    panel.lmline(x, y, ...)
+  })
+```
+
+This graph clearly shows the different relationships between circumference and age for the five trees. The residuals from the model can be plotted against fitted values, divided by tree, to investigate the model assumptions:
+```{r}
+xyplot(resid(orange.mod3) ~ fitted(orange.mod3) | orange.df$Tree,
+  xlab = "Fitted Values",
+  ylab = "Residuals",
+  main = "Residual Diagnostic Plot",
+  panel = function(x, y, ...)
+  {
+    panel.grid(h = -1, v = -1)
+    panel.abline(h = 0)
+    panel.xyplot(x, y, ...)
+  }
+)
+```
+
+There are no obvious problematic patterns in this graph so we conclude that this model is a reasonable representation of the relationship between circumference and age.
+
+Additional: The analysis of variance table comparing the second and third models shows an improvement by moving to the more complicated model with different slopes:
+```{r}
+anova(orange.mod2, orange.mod3)
+```

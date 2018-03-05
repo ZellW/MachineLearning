@@ -1,0 +1,161 @@
+---
+title: "EDA - Reading Data"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("readr", "data.table", "dplyr", "ggplot2", prompt = FALSE)
+```
+
+## Reading Data
+
+### readLines
+
+A first investigative exploration of a data set is the readLines function (https://stat.ethz.ch/R-manual/Rdevel/library/base/html/readLines.html). It allows you to cull a small amount of lines from the top of a file, no matter how big the file is. This is a silly example but imagine if your file is over 10 gigabytes in size, why waste time and memory when you aren’t sure what it contains?
+
+Let’s use the readLines function to open part of a text file off CRAN:
+
+```{r}
+readLines('https://cran.r-project.org/src/base/README', n=20)
+```
+
+This is a great way of discovering what data types are contained in a very large data set. You will see in the
+next few functions we use, knowing the data type in advance can speed things up tremendously.
+
+### read.table, read.csv, read.csv2
+
+read.csv is the most common reader in R, followed closely by read.table. In fact, read.csv and read.csv2 are both wrappers over read.table (https://stat.ethz.ch/R-manual/Rdevel/library/utils/html/read.table.html).
+
+```{r eval=FALSE}
+read.table(file, header = FALSE, sep = "", quote = "\"'",
+     dec = ".", numerals = c("allow.loss", "warn.loss", "no.loss"),
+     row.names, col.names, as.is = !stringsAsFactors,
+     na.strings = "NA", colClasses = NA, nrows = -1,
+     skip = 0, check.names = TRUE, fill = !blank.lines.skip,
+     strip.white = FALSE, blank.lines.skip = TRUE,
+     comment.char = "#",
+     allowEscapes = FALSE, flush = FALSE,
+     stringsAsFactors = default.stringsAsFactors(),
+     fileEncoding = "", encoding = "unknown", text, skipNul = FALSE)
+```
+
+Let’s use read.table. Here we’ll read the Titanic dataset from the University of Colorado Denver.  Eventhough it off the Internet, the same use applies to your hard-drive. We set the separator parameter of \\t for tabular and request to consider the first row as headers:
+
+```{r}
+Titanic_dataset <- read.table('http://math.ucdenver.edu/RTutorial/titanic.txt', sep='\t', header=TRUE)
+head(Titanic_dataset)
+```
+
+Let’s see if the function figured out the data types contained in the Titanic dataset:
+
+```{r}
+str(Titanic_dataset)
+```
+
+Not bad, but feature Names shouldn’t be a factor but a character. In this case, we could change it after the case or force the reader to make all text a character instead of factor by setting the stringsAsFactors to FALSE:
+
+```{r}
+Titanic_dataset <- read.table('http://math.ucdenver.edu/RTutorial/titanic.txt', sep='\t', header=TRUE, stringsAsFactors=FALSE)
+str(Titanic_dataset)
+```
+
+You can also pass custom column names directly to the read.table function:
+
+```{r eval=FALSE}
+
+actg320_colnames <- c('id','time','censor','time_d','censor_d','treatment','treatment_group','strat2','sex','raceth','ivdrug', 
+                      'hemophil','karnof','cd4','priorzdv','age')
+#Note - the file below is no longer shared
+actg320 <- read.table('https://www.umass.edu/statdata/statdata/data/actg320.dat', col.names = actg320_colnames)
+head(actg320)
+```
+
+Here’s a quick look at read.csv. For more differences between these readers see: read.table
+(http://www.inside-r.org/r-doc/utils/read.table)
+
+```{r}
+Iris_dataset <- read.csv('http://archive.ics.uci.edu/ml/machine-learning-databases/iris/bezdekIris.data', header=FALSE)
+head(Iris_dataset)
+```
+
+Before we move to more sophisticated readers, let’s build a simple data frame to work with. We’ll create a
+very small data set made of the following data types: integers, factors, doubles, and dates.
+
+```{r}
+mix_dataset <- data.frame(id=c(10,20,30,40,50), gender=c('male','female','female','male','female'), 
+                          some_date=c('2012-01-12','2012-01-12','2012-12-01','2012-05-30','2013-12-12'), 
+                          value=c(12.34, 32.2, 24.3, 83.1, 8.32), outcome=c(1,1,0,0,0))
+write.csv(mix_dataset, '../data/mix_dataset.csv', row.names = FALSE)
+```
+
+We save it to your current working directory and read it back again. Let’s look at it using read.csv:
+
+```{r}
+mix_dataset <- read.csv('../data/mix_dataset.csv', stringsAsFactors = FALSE)
+str(mix_dataset)
+```
+
+##Heavy-duty Readers
+
+### readr
+
+Let’s look at some readers that aren’t part of the base package. readr {readr} (https://cran.rproject.org/web/packages/readr/README.html) is a relatively new package maintained by Hadley Wickham. It does a great job at inferring data types and is fast!
+
+As you can see, some_date is correctly cast as Date, and it does pick up two integer fields:
+
+```{r readr}
+mix_dataset <- read_csv('./data/mix_dataset.csv')
+str(mix_dataset)
+```
+
+If you know in advance the data types in a data set, you can pass it along to the function to save it time and processing. In the first read, we force some_date to character, in the read we force the id field to be a numeric instead of an integer.
+
+```{r}
+mix_dataset <- read_csv('./data/mix_dataset.csv', col_types='nccnn')#number, character, character, number, number
+str(mix_dataset)
+
+mix_dataset <- read_csv('./data/mix_dataset.csv', col_types='ncDni')#D is date
+str(mix_dataset)
+```
+
+readr returns classes 'tbl_df', 'tbl', 'data.frame'.  From past experience, I have used readr only to find later in my code these multiple classes introduced code issues.  If that happens, you can still use eadr but cast it as a dataframe:
+
+```{r}
+mix_dataset <- read_csv('./data/mix_dataset.csv')
+class(mix_dataset)
+
+mix_dataset <- data.frame(read_csv('./data/mix_dataset.csv'))
+class(mix_dataset)
+```
+
+### fread
+
+fread {data.table} (http://www.inside-r.org/packages/cran/data.table/docs/fread) is the *fastest* of the bunch presented so far. **Set parameter data.table=FALSE to return a data frame**:
+
+```{r datatable}
+mix_dataset <- fread('./data/mix_dataset.csv', showProgress=TRUE, data.table=FALSE)
+str(mix_dataset)
+```
+
+If you only want a subset of columns, you can choose them directly in the fread command using the select parameter (similarly you can use the drop parameter to remove features):
+
+```{r datatable2}
+mix_dataset <- fread('./data/mix_dataset.csv', data.table=FALSE, select = c('value', 'outcome'))
+head(mix_dataset)
+```
+
+For reference, if you want to load data from an Excel spreadsheet, here are some popular libraries:
+
+- XLConnect (https://cran.r-project.org/web/packages/XLConnect/index.html)
+- openxlsx (https://cran.rproject.org/web/packages/openxlsx/index.html)
+readxl (https://cran.rproject.org/web/packages/readxl/index.html).
+
+##Pipeline Check
+
+So far we don’t really need to create any custom code, simply use read_csv or fread if you have large data and/or complex data types, otherwise stick to read.csv. If this is new data, use the readLines function:
+
+`path_and_file_name <- 'https://cran.r-project.org/src/base/README'`
+`print(readLines(path_and_file_name, n=5))`
+

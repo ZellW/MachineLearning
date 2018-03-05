@@ -1,0 +1,841 @@
+---
+title: "Data Transformation - Data Scrubbing"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("dplyr", "ggplot2", "readr", "data.table", "caret", prompt = FALSE)
+```
+
+## Dates
+
+What is an R-friendly date format? The full year, month, day separated by either a forward slash or a dash:
+
+> Easier to use the  r package `lubridate`
+
+```{r}
+as.Date('1950-06-16')
+
+as.Date('1950-6-16')
+
+as.Date('1950/02/17')
+
+as.Date('50/06/16')
+
+#Getting system time:
+print(Sys.Date())
+
+class(Sys.Date())
+
+print(Sys.time())
+
+class(Sys.time())
+
+as.numeric(as.Date("1950/06/16"))#Returns Unix dates start at 1970/01/01
+```
+
+### POSIX 
+
+POSIX functions manipulate objects of classes “POSIXlt” and “POSIXct” representing calendar dates and times. Though we’ll build our pipeline using only dates, it’s good to know about time-based functions (DateTimeClasses (https://stat.ethz.ch/R-manual/R-devel/library/base/html/DateTimeClasses.html)) as well. POSIXct is the total seconds since UNIX time, and POSIXltconverts time to various formats (these are from the help ﬁle, see ?POSIXlt for plenty more):
+
+```{r}
+#Pretty cool -
+as.POSIXlt(Sys.time(), "America/New_York") # in New York
+
+as.POSIXlt(Sys.time(), "EST5EDT") # alternative.
+
+as.POSIXlt(Sys.time(), "EST" ) # somewhere in Eastern Canada
+#If sub in PST, get an error - use PST8PDT (use link below)
+
+as.POSIXlt(Sys.time(), "HST") # in Hawaii
+
+as.POSIXlt(Sys.time(), "Australia/Darwin")
+```
+
+> Note: for list of time zones, see: Date and Time Gateway - Timezone Selector (http://twiki.org/cgibin/xtra/tzdatepick.html)
+
+### Custom Dates 
+
+If the you date isn’t in the correct order then you can use the format parameter to shape it correctly (see ?format.Date for more details):
+```{r}
+as.Date('1/12/2001',format='%d/%m/%Y')
+
+as.Date('April 26, 2001',format='%B %d, %Y')
+```
+Check out plenty more examples from Berkeley’s Concepts in Computing with Data class Dates and Times in R (http://www.stat.berkeley.edu/~s133/dates.html) So, if you have dates that are in the base R format (year-month-day) then you can use either the readr package to correctly cast them, but what about other formats?
+
+```{r}
+mix_dataset <- data.frame(id =c (10,20,30,40,50), 
+           gender=c('male','female','female','male','female'), 
+           some_date=c('01/11/2012','04/12/2012','28/02/2013','17/06/2014','0 8/03/2015'), 
+           value=c(12.34, 32.2, 24.3, 83.1, 8.32),
+           outcome=c(1,1,0,0,0)) 
+ 
+write.csv(mix_dataset, '../EDA/data/mix_dataset.csv', row.names=FALSE) 
+ 
+mix_dataset <- read_csv('../EDA/data/mix_dataset.csv') 
+mix_dataset$some_date <-  as.Date(mix_dataset$some_date, format="%d/%m/%Y") 
+str(mix_dataset$some_date)
+```
+
+Let’s wrap the above code into a handy function for our pipeline:
+
+```{r pipeline}
+Fix_Date_Features <- function(data_set){
+     #Looks for the feature names that are character or factor
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+          #Loop thru each of the feature variables found above
+          for (feature_name in text_features){
+               feature_vector <- as.character(data_set[,feature_name])
+               # assuming date pattern: '01/11/2012'
+               date_pattern <- '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]'
+               #10 characters in a properly formatted date like 12/02/1961
+               if(max(nchar(feature_vector)) == 10){
+                    #grepl returns true/false list
+                    if(sum(grepl(date_pattern, feature_vector)) > 0){
+                         #print(paste('Casting feature to date:', feature_name))#nive to have, not needed
+                         #If the feature variable makes it this far, format like a date
+                         data_set[, feature_name] <-  as.Date(feature_vector, format="% d/%m/%Y")}
+               }
+          }
+     return (data_set)}
+```
+
+Lets walk through this function so it is well understood.
+
+```{r step1, message=FALSE}
+data_set <- as.data.frame(read_csv("../EDA/data/mix_dataset.csv")) #start with fresh data
+data_set[5,3] <- "08/03/2015"  #formating error in the some_date field corrected
+str(data_set)
+#Step 1
+text_features <- c(names(data_set[sapply(data_set, is.character)]), 
+                   names(data_set[sapply(data_set, is.factor)]))
+text_features
+```
+
+We will not need to evaluate gender so we will skip it.
+
+```{r step2}
+feature_name <- "some_date"
+
+feature_vector <- as.character(data_set[, feature_name])
+feature_vector
+
+date_pattern <- '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]'
+
+max(nchar(feature_vector)) == 10
+```
+
+Review the grepl statement and cast the feature varible to a Date
+
+```{r}
+grepl(date_pattern, feature_vector)#This should capture the data error I corrected above
+
+data_set[, feature_name] <-  as.Date(feature_vector, format="% d/%m/%Y")
+str(data_set)
+```
+
+## Pipeline Check 
+
+In case you have to deal with dates in a non-standard format, here is code to run through every feature and use grepl to identify and transform them:
+
+```{r}
+path_and_file_name <- '../EDA/data/mix_dataset.csv' 
+print(readLines(path_and_file_name, n=5))
+
+# format dates 1st step in pipeline
+mix_dataset <- read.csv(path_and_file_name, stringsAsFactor=FALSE) 
+print(head(Fix_Date_Features(mix_dataset)))
+```
+
+## Text Data
+
+### Text
+
+We need to find clever ways of turning text data into numbers. You can choose to ignore any text and just model off the numerical variables but you would be leaving a lot of intelligence on the table. At a high level, there are two types of text data, free-form text and categorical text Free-form text is complicated and requires a lot more custom work to extract quantitative value out of it - though beyond the scope of this course, we’ll look at some simple ways of capturing value out of them. Categorical data, on the other hand, is fair game and there are many ways to translate that into quantitative variables.
+
+### Free-Form Text
+
+So, what about regular text? Without delving into natural language processing (NLP), there are a few easy things we can do on free-form text before discarding it. This comes down to feature engineering:
+
+- Number of words
+- Character count
+- First word
+
+Let’s run through a few code snippets on how to extract these basic quantitative measures and then build a function to handle this automatically for our pipeline.
+
+### Number of words
+
+Let’s gather the number of words from the Name field of the Titanic data set:
+
+```{r}
+# load the data set in case you haven't already done so
+Titanic_dataset <- read.table('http://math.ucdenver.edu/RTutorial/titanic.txt', sep='\t', header=TRUE, stringsAsFactors = FALSE)
+head(Titanic_dataset)
+
+Titanic_dataset_temp <- Titanic_dataset
+#Calculate the number of words in the Name field - just uses spaces - I think this is unreliable - OK for just names
+#Keeps the comma.  My wordcount function below does not (of course we are just counting so this is OK)
+#sapply simple gives you the number of words left by strsplit
+Titanic_dataset_temp$Word_Count <- sapply(strsplit(Titanic_dataset_temp$Name, " "), length)
+print(head(Titanic_dataset_temp))
+```
+
+>Note:  I prefer this function:
+
+```{r}
+wordcount <- function(str) {sapply(gregexpr("\\b\\W+\\b", str, perl=TRUE), function(x) sum(x>0) ) + 1}
+```
+
+
+### Character count
+
+Let’s count the number of characters in the Name field of the Titanic data set:
+
+```{r charcount}
+Titanic_dataset_temp <- Titanic_dataset
+Titanic_dataset_temp$Character_Count <- nchar(as.character(Titanic_dataset_temp$Name))#as.character just in case it is a factor
+head(Titanic_dataset_temp)
+```
+
+### First word
+
+Finally, let’s get the first word and treat it as a categorical variable:
+
+```{r firstword}
+Titanic_dataset_temp <- Titanic_dataset#keep the original virgin data set
+#strplit on spaces gives you a list.  "[", 1 selects the fist item in the list
+Titanic_dataset_temp$First_Word <- sapply(strsplit(as.character(Titanic_dataset_temp$Name), " "), `[`, 1)
+head(Titanic_dataset_temp)
+```
+
+> Note the unusal code above:  `[`, 1).  
+See https://stackoverflow.com/questions/19260951/using-square-bracket-as-a-function-for-lapply-in-r
+
+```{r note1_code}
+x <- list(a=1,b=2)
+tmp1 <- as.integer( (x[1]) )#cast as int to compare - otherwise it would be a list
+tmp1
+
+tmp2 <- as.integer( ("["(x,1)) )#cast as int to compare - otherwise it would be a list
+tmp2
+
+tmp1 == tmp2
+```
+
+
+This is just a small selection of possibilities. In the case of the Name field in the Titanic data set, pulling out the title and first name of the person would be worth a try. I am not adding it to our pipeline function as these are unique cases that will vary from data set to data set.
+
+We need to make an important assumption here, what differentiates categorical text from free-form text?  On the surface, the both appear as text entries, so here, I am considering data with more than 90% uniqueness as free-form text, and anything less, as categorical data. This is definitely one of the parameters that will need to be clearly exposed in your pipeline as it may require a lot of experimentation.
+
+>Note:  the threshold value should be changed depending on your uniwue needs and if the data set is large.
+
+## Build Text function:
+
+>Note:  Will ahve to add/remove functions specific to your needs.
+
+```{r}
+Get_Free_Text_Measures <- function(data_set, minimum_unique_threshold=0.9, features_to_ignore=c()){
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+     for (f_name in setdiff(text_features, features_to_ignore)){
+          f_vector <- as.character(data_set[,f_name])
+          if (length(unique(as.character(f_vector))) > (nrow(data_set) * minimum_unique_threshold)){
+               data_set[,paste0(f_name, '_word_count')] <- sapply(strsplit(f_vector, " "), length)
+               data_set[,paste0(f_name, '_character_count')] <- nchar(as.character(f_vector))
+               data_set[,paste0(f_name, '_first_word')] <- sapply(strsplit(as.character(f_vector), " "), `[`, 1)
+               data_set[,f_name] <- NULL
+               }
+          }
+     return(data_set)
+}
+```
+
+### Text Function Walkthrough
+
+```{r}
+#Start with fresh data and add first name variable like we did above
+data_set <- Titanic_dataset
+data_set$First_Word <- sapply(strsplit(as.character(Titanic_dataset_temp$Name), " "), `[`, 1)
+
+# look for text entries that are mostly unique.  Collect character and factor variables (no dates or numbers)
+text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+text_features#collection of the words we can evaluate
+```
+```{r}
+#in f_name in setdiff(text_features, features_to_ignore)) you can choose to ignore a value(s) in text_features
+#Example
+features_to_ignore = c("Sex")
+text_features <- setdiff(text_features, features_to_ignore)
+text_features#collection of the words without Sex variable
+
+#It is easier to create a vector of the data we want to evaluate.  This is not required, just easier
+#f_vector <- as.character(data_set[,f_name]) - using First_Word variable for the walkthrough
+f_vector <- as.character(data_set$First_Word)
+head(f_vector)
+```
+
+```{r}
+#Next line:
+#if (length(unique(as.character(f_vector))) > (nrow(data_set) * minimum_unique_threshold))
+#simply makes sure that the number of unique values satisfies your threshold
+minimum_unique_threshold <- 0.9
+length(unique(as.character((f_vector))))
+(nrow(data_set) * minimum_unique_threshold)
+length(unique(as.character((f_vector)))) > (nrow(data_set) * minimum_unique_threshold)
+
+#if the comparision results in TRUE, then add columns for word count, characer count and first work to each feature
+#if FALSE, ignore.  Will treat as a categorical function later in the pipeline
+#
+#Then remove the original variable name that has been processed
+#data_set[,f_name] <- NULL
+```
+
+
+```{r}
+Titanic_dataset_temp <- Get_Free_Text_Measures(data_set = Titanic_dataset_temp, features_to_ignore = c())
+str(Titanic_dataset_temp)
+```
+
+Note the original Name field is replaced by the new columns
+
+## Categorical Data
+
+### Factors
+
+We are now able to recognize the most common data types but the problem remains that in order to model data, everything needs to be in a numerical format. In the majority of cases you cannot turn text into factors and model off the level of that factor. This only works in rare cases with ordered categorical data and even then you have to be very careful. Imagine a survey question on satisfaction going from very unhappy to very happy. It would seem logical that we could use the index value of those categories instead of the text. And, in this case it works - if happy is 4 and very happy is 5, then 4.5 is somewhere in between. Nope, not if you use straight out-of-the-box factor levels:
+
+```{r}
+survey <- data.frame(satisfaction=c('very unhappy','unhappy','neutral','happy','very happy'))
+survey
+class(survey)
+class(survey$satisfaction)#R recognized this as a factor so no need for as.factor(survey$satisfaction)
+
+survey$satisfaction_Level <- as.numeric(survey$satisfaction)
+survey
+```
+
+Unfortunately, you cannot blindly rely on the factor level as it automatically assigns levels based on alphabetic order. So, to make sure that 1.5 is between very unhappy and unhappy you would need to customized the level correctly:
+
+```{r}
+#survey$satisfaction <- as.factor(survey$satisfaction)
+levels(survey$satisfaction) <- list('very unhappy'=1,'unhappy'=2,'neutral'=3,'happy'=4,'very happy'=5)
+survey$satisfaction_Level <- as.numeric(survey$satisfaction)
+survey
+```
+
+We can pull this off because it is an ordered categorical variable and because it is small. What about bigger categories and non-ordered ones? Like what to do with Zip codes that have over 43,000 levels where an intermediary value between two zip codes doesn’t mean anything?
+
+### Binarizing Data - Making Dummy Features
+
+You can create dummy variables manually, using base functions, such as matrix, or a packaged function like dummyVar from the caret package. Let’s build our own function to create dummy variables so we can fully appreciate what it means.
+
+Let’s take a simple example using the Titanic data set:
+
+```{r}
+Titanic_dataset <- read.table('http://math.ucdenver.edu/RTutorial/titanic.txt', sep='\t', header=TRUE)
+head(Titanic_dataset)
+```
+PClass and Sex are candidates to be binarized:
+
+```{r}
+str(Titanic_dataset)
+```
+
+We could do it by hand such as:
+
+```{r}
+Titanic_dataset_temp <- Titanic_dataset
+Titanic_dataset_temp$Sex_Female <- ifelse(Titanic_dataset_temp$Sex=='female', 1, 0)
+Titanic_dataset_temp$Sex_Male <- ifelse(Titanic_dataset_temp$Sex=='male', 1, 0)
+head(Titanic_dataset_temp)
+```
+
+Or we can automate the process by building a simple loop to break each variable by unique values and creating a new column for each:
+
+```{r}
+Titanic_dataset_temp <- Titanic_dataset
+
+for (newcol in unique(Titanic_dataset_temp$PClass)) {
+     feature_name <- 'PClass'
+     Titanic_dataset_temp[,paste0(feature_name,"_",newcol)] <- ifelse(Titanic_dataset_temp[,feature_name]==newcol,1,0)
+}
+head(Titanic_dataset_temp)
+```
+
+We successfully binarized a categorical variable with two lines of code. Lets build a real function to handle everything automatically. One word of caution, especially when running linear models, is the [dummy trap](http://analyticstraining.com/2014/understanding-dummy-variable-traps-regression/). The general rule for creating dummy variables is to have one less variable than the number of categories present to avoid perfect collinearity. This is not an issue for tree-based classifying algorithms.
+
+Here is our full-fledged function that can handle missing variables and the dummy trap.
+
+```{r}
+Binarize_Features <- function(data_set, features_to_ignore=c(), leave_out_one_level=FALSE){
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+     for (feature_name in setdiff(text_features, features_to_ignore)){
+          feature_vector <- as.character(data_set[,feature_name])
+          # check that data has more than one level then do not do anything - exit loop
+          if (length(unique(feature_vector)) == 1)
+               next
+          # We set any non-data to text
+          feature_vector[is.na(feature_vector)] <- 'NA'
+          feature_vector[is.infinite(feature_vector)] <- 'INF'
+          feature_vector[is.nan(feature_vector)] <- 'NAN'
+          
+          # loop through each level of a feature and create a new column
+          first_level=TRUE#Just means the first one is skipped for leave one out
+          for (newcol in unique(feature_vector)){
+               if (first_level && leave_out_one_level){
+                    # avoid dummy trap and skip first level
+                    first_level=FALSE
+               } else {
+                    #Create new features
+                    data_set[,paste0(feature_name,"_",newcol)] <- ifelse(feature_vector==newcol,1,0)}
+               }
+          # remove original feature
+          data_set <- data_set[,setdiff(names(data_set),feature_name)]
+          }
+     return (data_set)
+}
+```
+
+```{r}
+Titanic_dataset_temp <- Binarize_Features(data_set = Titanic_dataset, features_to_ignore = c('Name'))
+str(Titanic_dataset_temp)
+```
+
+Now lets avoid collinearity (even if not a linear regression, go to reduce unneeded variables)
+
+```{r}
+Titanic_dataset_temp <- Binarize_Features(data_set = Titanic_dataset, features_to_ignore = c("Name"), 
+                      leave_out_one_level = TRUE)
+str(Titanic_dataset_temp)
+```
+
+If you need to use linear or logistic regression models, check out the dummyVars (http://www.insider.org/packages/cran/caret/docs/dummyVars) function from the caret (http://topepo.github.io/caret/index.html) package. It offers a lot more bells and whistles than our basic
+function.
+
+## Pipeline Check
+
+Let’s load our pipeline functions:
+
+```{r}
+Fix_Date_Features <- function(data_set){
+     #Looks for the feature names that are character or factor
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+          #Loop thru each of the feature variables found above
+          for (feature_name in text_features){
+               feature_vector <- as.character(data_set[,feature_name])
+               # assuming date pattern: '01/11/2012'
+               date_pattern <- '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]'
+               #10 characters in a properly formatted date like 12/02/1961
+               if(max(nchar(feature_vector)) == 10){
+                    #grepl returns true/false list
+                    if(sum(grepl(date_pattern, feature_vector)) > 0){
+                         #print(paste('Casting feature to date:', feature_name))#nive to have, not needed
+                         #If the feature variable makes it this far, format like a date
+                         data_set[, feature_name] <-  as.Date(feature_vector, format="% d/%m/%Y")}
+               }
+          }
+     return (data_set)}
+######################
+Get_Free_Text_Measures <- function(data_set, minimum_unique_threshold=0.9, features_to_ignore=c()){
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+     for (f_name in setdiff(text_features, features_to_ignore)){
+          f_vector <- as.character(data_set[,f_name])
+          if (length(unique(as.character(f_vector))) > (nrow(data_set) * minimum_unique_threshold)){
+               data_set[,paste0(f_name, '_word_count')] <- sapply(strsplit(f_vector, " "), length)
+               data_set[,paste0(f_name, '_character_count')] <- nchar(as.character(f_vector))
+               data_set[,paste0(f_name, '_first_word')] <- sapply(strsplit(as.character(f_vector), " "), `[`, 1)#See
+               #https://stackoverflow.com/questions/19260951/using-square-bracket-as-a-function-for-lapply-in-r
+               data_set[,f_name] <- NULL
+               }
+          }
+     return(data_set)
+}
+######################
+Binarize_Features <- function(data_set, features_to_ignore=c(), leave_out_one_level=FALSE){
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+     for (feature_name in setdiff(text_features, features_to_ignore)){
+          feature_vector <- as.character(data_set[,feature_name])
+          # check that data has more than one level then do not do anything - exit loop
+          if (length(unique(feature_vector)) == 1)
+               next
+          # We set any non-data to text
+          feature_vector[is.na(feature_vector)] <- 'NA'
+          feature_vector[is.infinite(feature_vector)] <- 'INF'
+          feature_vector[is.nan(feature_vector)] <- 'NAN'
+          
+          # loop through each level of a feature and create a new column
+          first_level=TRUE#Just means the first one is skipped for leave one out
+          for (newcol in unique(feature_vector)){
+               if (first_level && leave_out_one_level){
+                    # avoid dummy trap and skip first level
+                    first_level=FALSE
+               } else {
+                    #Create new features
+                    data_set[,paste0(feature_name,"_",newcol)] <- ifelse(feature_vector==newcol,1,0)}
+               }
+          # remove original feature
+          data_set <- data_set[,setdiff(names(data_set),feature_name)]
+          }
+     return (data_set)
+}
+```
+
+We now have two functions to prepare our data for modeling. I added the date transformation function just for illustration. We also need to go over raw text before categorical text as after cleaning up the raw text we end up with a new categorical field, the first word.
+
+```{r}
+Titanic_dataset <- read.table('http://math.ucdenver.edu/RTutorial/titanic.txt', sep='\t', header=TRUE, 
+               stringsAsFactors = FALSE)
+Titanic_dataset_temp <- Titanic_dataset
+
+# fix date field if any (there are none in this dataset)
+Titanic_dataset_temp <- Fix_Date_Features(data_set = Titanic_dataset_temp)
+
+# extra quantative value out of text entires
+Titanic_dataset_temp <- Get_Free_Text_Measures(data_set = Titanic_dataset_temp)
+
+#binarize categories
+Titanic_dataset_temp <- Binarize_Features(data_set = Titanic_dataset_temp, features_to_ignore = c(), 
+                      leave_out_one_level = TRUE)
+dim(Titanic_dataset_temp)
+```
+
+Wow, `r dim(Titanic_dataset_temp)[1]` columns now!  The Name_first_word has been broken down to individual columns.
+
+## Capping Categories
+
+What to do when there are too many categories? Plenty of possibilities and here we’ll go with the most popular categories. So if there are over 1000 categories, we’ll find the top 20 (or whatever you choose) and neutralize all the other categories. Lets re-run the pipeline check up to Get_Free_Text_Measures and figure out the most popular entries:
+
+```{r}
+Titanic_dataset <- read.table('http://math.ucdenver.edu/RTutorial/titanic.txt', sep='\t', 
+                    header=TRUE, stringsAsFactors = FALSE)
+
+Titanic_dataset_temp <- Titanic_dataset
+
+# fix date field if any
+Titanic_dataset_temp <- Fix_Date_Features(data_set = Titanic_dataset_temp)
+
+# extra quantative value out of text entires
+Titanic_dataset_temp <- Get_Free_Text_Measures(data_set = Titanic_dataset_temp)
+
+# get the Name_first_word feature
+temp_vect <- Titanic_dataset_temp$Name_first_word
+head(temp_vect)
+
+# only give us the top 20 most popular categories
+popularity_count <- 20
+
+temp_vect <- data.frame(table(temp_vect)) %>% arrange(desc(Freq)) %>% head(popularity_count)
+head(temp_vect)
+
+Titanic_dataset_temp$Name_first_word <- ifelse(Titanic_dataset_temp$Name_first_word %in% temp_vect$temp_vect, 
+                                Titanic_dataset_temp$Name_first_word, 'Other')
+
+head(Titanic_dataset_temp$Name_first_word,40)
+```
+
+Then we can run through our last pipeline function Binarize_Features and look at our transformed data set:
+
+```{r}
+# binarize categories
+Titanic_dataset_temp <- Binarize_Features(data_set = Titanic_dataset_temp, features_to_ignore = c(), 
+                      leave_out_one_level = TRUE)
+head(Titanic_dataset_temp, 2)
+table(Titanic_dataset_temp$Name_first_word)
+```
+
+So, lets add this popularity feature to our Binarize_Features function by adding a new parameter max_level_count (20 is completely arbitrary here, if you have the computing muscle and the need, you could have categories in the 1000’s):
+
+```{r}
+Binarize_Features <- function(data_set, features_to_ignore=c(), leave_out_one_level=FALSE, max_level_count=20){
+     require(dplyr)
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+     for (feature_name in setdiff(text_features, features_to_ignore)){
+          feature_vector <- as.character(data_set[,feature_name])
+          # check that data has more than one level
+          if (length(unique(feature_vector)) == 1)
+               next
+          # We set any non-data to text
+          feature_vector[is.na(feature_vector)] <- 'NA'
+          feature_vector[is.infinite(feature_vector)] <- 'INF'
+          feature_vector[is.nan(feature_vector)] <- 'NAN'
+          
+          # only give us the top x most popular categories
+          temp_vect <- data.frame(table(feature_vector)) %>% arrange(desc(Freq)) %>% head(max_level_count)
+          feature_vector <- ifelse(feature_vector %in% temp_vect$feature_vector, feature_vector, 'Other')
+          
+          # loop through each level of a feature and create a new column
+          first_level=TRUE
+          for (newcol in unique(feature_vector)){
+               if (leave_out_one_level & first_level){
+                    # avoid dummy trap and skip first level
+                    first_level=FALSE
+                    next
+               }
+               data_set[,paste0(feature_name,"_",newcol)] <- ifelse(feature_vector==newcol,1,0)
+          }
+          # remove original feature
+          data_set <- data_set[,setdiff(names(data_set),feature_name)]
+     }
+     return (data_set)
+}
+```
+
+## Imputing Missing Data
+
+NAs can mean different things in different contexts. The two types of imputation we will evalauate are replacing them with 0’s and replacing them with mean value of that feature. Before any imputation, we will create a new binary feature stating whether a cell was an NA or not.
+
+When should you impute with 0 versus its mean value? It all depends on the context. Imagine a library count of books checked out - if a patron has NA, you would not want to replace it with the mean value for that field, but a 0 would fit nicely. If the patron has never checked out a book, then they have 0 books checked out. On the other hand, imagine a feature holding the age of customers, you wouldn’t want to replace NA’s with 0’s as a customer with no reported age will never be 0 years of age. Here, taking the mean value of all ages recorded works well. Unfortunately, there are no easy rules. From a modeling perspective, taking the mean is a relatively easy way to get those turned into numbers without affecting the model too drastically.
+
+Build a simple data set to wrap our heads around these questions:
+
+```{r}
+mix_dataset <- data.frame(id=c(1,NA,3,4,5), mood=c(0,20,20,Inf,50), value=c(12.34, 32.2, NaN, 83.1, 8.32), 
+                outcome=c(1,1,0,0,0))
+head(mix_dataset)
+```
+So, how do we find these NA’s programmatically?
+
+```{r}
+mix_dataset_temp <- mix_dataset
+
+# where are the NAs?
+is.na(mix_dataset_temp)
+```
+
+>Note that the Inf value is not reported as a NA.  You might need to handle those values too.
+
+In many situations, you’ll want to customize the imputation of your feature. Here we’ll go over imputing with 0 or mean, but you could use a custom number or the max, min, median, etc.
+
+```{r}
+# impute column:
+mix_dataset_temp$id[is.na(mix_dataset_temp$id)] <- 0
+mix_dataset_temp
+
+mix_dataset_temp$value[is.nan(mix_dataset_temp$value)] <- mean(mix_dataset_temp$value, na.rm = TRUE)
+mix_dataset_temp
+```
+
+It may be useful for your model to mark all the NA, inf, NaN before removing them. We make that an optional parameter that is turned off by default. We also add a parameter to prune out any feature with zero variance, where all the values are the same. We are making it optional as there may be some cases where you may want to see it while exploring, but this will not help (and may even hurt) your modeling efforts.
+
+You will often have to add more IF statements for your specific effort.
+
+```{r}
+Impute_Features <- function(data_set, features_to_ignore=c(), 
+                            use_mean_instead_of_0=TRUE, 
+                            mark_NAs=FALSE,
+                            remove_zero_variance=FALSE){
+     
+     for(feature_name in setdiff(names(data_set), features_to_ignore)){
+          #print(feature_name)#Nice but not needed
+          # remove any fields with zero variance
+          if(remove_zero_variance){
+               if(length(unique(data_set[, feature_name]))==1){
+                    data_set[, feature_name] <- NULL
+                    next
+               }
+          }
+          if(mark_NAs){
+               # note each field that contains missing or bad data.  is.na catches NA and NaN
+               if(any(is.na(data_set[,feature_name]))){
+                    # create binary column before imputing
+                    newName <- paste0(feature_name, '_NA')
+                    data_set[,newName] <- as.integer(ifelse(is.na(data_set[,feature_name]),1,0)) }
+
+               if(any(is.infinite(data_set[,feature_name]))){
+                    newName <- paste0(feature_name, '_inf')
+                    data_set[,newName] <- as.integer(ifelse(is.infinite(data_set[, feature_name]),1,0)) }
+          }
+          
+          if (use_mean_instead_of_0){
+               #Need to replace Inf with NA so that na.rm=TRUE works below 0 there is no Inf.rm; NaNs are ok as is
+               data_set[is.infinite(data_set[,feature_name]),feature_name] <- NA
+               data_set[is.na(data_set[,feature_name]),feature_name] <- mean(data_set[,feature_name], na.rm=TRUE)
+               } else {
+                    #You deciced to keep 0's rather than mean
+                    data_set[is.na(data_set[,feature_name]),feature_name] <- 0
+                    data_set[is.infinite(data_set[,feature_name]),feature_name] <- 0
+               }
+     }
+     return(data_set)
+}
+```
+
+```{r}
+#Means
+mix_dataset_temp <- Impute_Features(mix_dataset, use_mean_instead_of_0 = TRUE, mark_NAs = TRUE)
+head(mix_dataset_temp)
+
+#Zeroes and do not create new variables
+mix_dataset_temp <- Impute_Features(mix_dataset, use_mean_instead_of_0 = FALSE, mark_NAs = FALSE)
+head(mix_dataset_temp)
+```
+
+## Pipeline Check
+
+Before we move into feature engineering, let’s do a test run through all our pipeline functions we’ve built so far. We’ll build a test data set with interesting data for our functions to clean up.
+
+Load our pipeline functions:
+
+```{r}
+Fix_Date_Features <- function(data_set){
+     #Looks for the feature names that are character or factor
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+          #Loop thru each of the feature variables found above
+          for (feature_name in text_features){
+               feature_vector <- as.character(data_set[,feature_name])
+               # assuming date pattern: '01/11/2012'
+               date_pattern <- '[0-9][0-9]/[0-9][0-9]/[0-9][0-9][0-9][0-9]'
+               #10 characters in a properly formatted date like 12/02/1961
+               if(max(nchar(feature_vector)) == 10){
+                    #grepl returns true/false list
+                    if(sum(grepl(date_pattern, feature_vector)) > 0){
+                         #print(paste('Casting feature to date:', feature_name))#nive to have, not needed
+                         #If the feature variable makes it this far, format like a date
+                         data_set[, feature_name] <-  as.Date(feature_vector, format="% d/%m/%Y")}
+               }
+          }
+     return (data_set)}
+######################
+Get_Free_Text_Measures <- function(data_set, minimum_unique_threshold=0.9, features_to_ignore=c()){
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+     for (f_name in setdiff(text_features, features_to_ignore)){
+          f_vector <- as.character(data_set[,f_name])
+          if (length(unique(as.character(f_vector))) > (nrow(data_set) * minimum_unique_threshold)){
+               data_set[,paste0(f_name, '_word_count')] <- sapply(strsplit(f_vector, " "), length)
+               data_set[,paste0(f_name, '_character_count')] <- nchar(as.character(f_vector))
+               data_set[,paste0(f_name, '_first_word')] <- sapply(strsplit(as.character(f_vector), " "), `[`, 1)
+               data_set[,f_name] <- NULL
+               }
+          }
+     return(data_set)
+}
+
+######################
+Binarize_Features <- function(data_set, features_to_ignore=c(), leave_out_one_level=FALSE, max_level_count=20){
+     require(dplyr)
+     text_features <- c(names(data_set[sapply(data_set, is.character)]), names(data_set[sapply(data_set, is.factor)]))
+     for (feature_name in setdiff(text_features, features_to_ignore)){
+          feature_vector <- as.character(data_set[,feature_name])
+          # check that data has more than one level
+          if (length(unique(feature_vector)) == 1)
+               next
+          # We set any non-data to text
+          feature_vector[is.na(feature_vector)] <- 'NA'
+          feature_vector[is.infinite(feature_vector)] <- 'INF'
+          feature_vector[is.nan(feature_vector)] <- 'NAN'
+          
+          # only give us the top x most popular categories
+          temp_vect <- data.frame(table(feature_vector)) %>% arrange(desc(Freq)) %>% head(max_level_count)
+          feature_vector <- ifelse(feature_vector %in% temp_vect$feature_vector, feature_vector, 'Other')
+          
+          # loop through each level of a feature and create a new column
+          first_level=TRUE
+          for (newcol in unique(feature_vector)){
+               if (leave_out_one_level & first_level){
+                    # avoid dummy trap and skip first level
+                    first_level=FALSE
+                    next
+               }
+               data_set[,paste0(feature_name,"_",newcol)] <- ifelse(feature_vector==newcol,1,0)
+          }
+          # remove original feature
+          data_set <- data_set[,setdiff(names(data_set),feature_name)]
+     }
+     return (data_set)
+}
+######################
+Impute_Features <- function(data_set, features_to_ignore=c(), 
+                            use_mean_instead_of_0=TRUE, 
+                            mark_NAs=FALSE,
+                            remove_zero_variance=FALSE){
+     
+     for(feature_name in setdiff(names(data_set), features_to_ignore)){
+          #print(feature_name)#Nice but not needed
+          # remove any fields with zero variance
+          if(remove_zero_variance){
+               if(length(unique(data_set[, feature_name]))==1){
+                    data_set[, feature_name] <- NULL
+                    next
+               }
+          }
+          if(mark_NAs){
+               # note each field that contains missing or bad data.  is.na catches NA and NaN
+               if(any(is.na(data_set[,feature_name]))){
+                    # create binary column before imputing
+                    newName <- paste0(feature_name, '_NA')
+                    data_set[,newName] <- as.integer(ifelse(is.na(data_set[,feature_name]),1,0)) }
+
+               if(any(is.infinite(data_set[,feature_name]))){
+                    newName <- paste0(feature_name, '_inf')
+                    data_set[,newName] <- as.integer(ifelse(is.infinite(data_set[, feature_name]),1,0)) }
+          }
+          
+          if (use_mean_instead_of_0){
+               #Need to replace Inf with NA so that na.rm=TRUE works below 0 there is no Inf.rm; NaNs are ok as is
+               data_set[is.infinite(data_set[,feature_name]),feature_name] <- NA
+               data_set[is.na(data_set[,feature_name]),feature_name] <- mean(data_set[,feature_name], na.rm=TRUE)
+               } else {
+                    #You deciced to keep 0's rather than mean
+                    data_set[is.na(data_set[,feature_name]),feature_name] <- 0
+                    data_set[is.infinite(data_set[,feature_name]),feature_name] <- 0
+               }
+     }
+     return(data_set)
+}
+```
+
+```{r}
+mix_dataset <- data.frame(ids=c(1,NA,3,4,5),
+                          some_dates = c('01/11/2012','04/12/2012','28/02/2013','17/06/2014','08/03/2015'),
+                          mood=c(0,20,20,Inf,50),
+                          some_real_numbers = c(12.34, 32.2, NaN, 83.1, 8.32),
+                          some_text = c('sentence one','sentence two', 'mixing it up', 'sentence four', 'sentence five'))
+head(mix_dataset)
+
+write_csv(mix_dataset, './data/mix_dataset.csv')
+# take a peek at the data
+readLines('./data/mix_dataset.csv', n=3)
+
+mix_dataset <- fread('./data/mix_dataset.csv', data.table = FALSE)#Cool - data.table = FALSE returns a dataframe directly
+# format date field to be R compliant
+mix_dataset$some_dates <- as.Date(mix_dataset$some_dates, format="%d/%m/%Y")#only have to process 1 so skip the function
+str(mix_dataset$some_dates)
+
+mix_dataset <- Get_Free_Text_Measures(data_set = mix_dataset)
+head(mix_dataset,2)
+
+# binarize categories
+mix_dataset <- Binarize_Features(data_set = mix_dataset, features_to_ignore = c(), leave_out_one_level = TRUE)
+head(mix_dataset, 2)
+
+# impute missing data using 0
+mix_dataset <- Impute_Features(mix_dataset, use_mean_instead_of_0 = FALSE, features_to_ignore = c('some_dates'))
+
+mix_dataset
+```
+
+## Caret - nearZeroVar
+
+`nearZeroVar` diagnoses predictors that have one unique value (i.e. are zero variance predictors) or predictors that are have both of the following characteristics: they have very few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large. checkConditionalX looks at the distribution of the columns of x conditioned on the levels of y and identifies columns of x that are sparse within groups of y.
+
+```{r}
+mix_dataset <- data.frame(id=sample(1:100, replace=FALSE), value=runif(100, 1, 55.5), no_var=rep(1, 100))
+summary(mix_dataset)
+
+nearZeroVar(mix_dataset, saveMetrics = TRUE)#Not super helpful w/o saveMetrics
+
+mix_dataset$little_var <- c(rep(1,98), 2, 3)
+summary(mix_dataset)
+
+nzv <- nearZeroVar(mix_dataset, saveMetrics = TRUE)
+nzv
+nzv$percentUnique
+
+rownames(nzv[nzv$percentUnique > 1,])
+
+rownames(nzv[nzv$percentUnique > 3,])
+```
+
+Perhaps go back and use this in the functions built in this document.

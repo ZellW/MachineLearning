@@ -1,0 +1,6 @@
+id,gender,some_date,mood,value,outcome
+1,male,2012-01-01,0,12.34,1
+2,female,2013-01-01,20,32.2,1
+3,female,2014-01-01,20,24.3,0
+4,male,2015-01-01,NA,83.1,0
+5,female,20 16-01-01,50,8.32,0

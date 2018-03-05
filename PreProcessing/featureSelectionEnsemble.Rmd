@@ -1,0 +1,82 @@
+---
+title: "Reducing Dimensionality with Ensemble Modeling"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("mRMRe", "caret", "glmnet", prompt = FALSE)
+```
+
+The Minimum Redundancy Maximum Relevance (mRMR) package is based on Minimum redundancy feature selection (https://en.wikipedia.org/wiki/Minimum_redundancy_feature_selection) and is a very popular tool in bio-statistics and genetic research to sort through data sets contain thousands to millions of features. It is known to be very fast and to do a better job that the classical forward, backward, mixed selection approaches. 
+
+For more information on the actual R package see this vignette from its authors (https://cran.rproject.org/web/packages/mRMRe/vignettes/mRMRe.pdf). 
+
+Gisette Data again: (https://archive.ics.uci.edu/ml/datasets/Gisette)).
+
+```{r}
+gisetteRaw <- read.table("./data/gisette_train.txt", sep = '', header = FALSE, stringsAsFactors = FALSE)    
+g_labels <- read.table("./data/gisette_train.labels", sep = '', header = FALSE, stringsAsFactors = FALSE)   
+
+# build data set - some models want numeric rather than integers so we just to it automatically as a best practice
+gisette_df <- cbind(as.data.frame(sapply(gisetteRaw, as.numeric)), cluster=g_labels$V1)
+
+gisette_df <- gisette_df[!duplicated(lapply(gisette_df, summary))] 
+gisette_df$cluster <- ifelse(gisette_df$cluster==-1,0,1)
+
+set.seed(1234) 
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df))) 
+gisette_df_train_test <- gisette_df[split,] 
+gisette_df_validate <- gisette_df[-split,] 
+
+split <- sample(nrow(gisette_df_train_test), floor(0.5*nrow(gisette_df_train_test))) 
+traindf <- gisette_df_train_test[split,] 
+testdf <- gisette_df_train_test[-split,]
+```
+
+We now call `mRMRe` on the data set. We ask for the top 20 features and show scores and feature names:
+
+```{r}
+mRMR_data <- mRMR.data(data = traindf) 
+print(mRMR_data)
+
+# classic example 
+feats <- mRMR.classic(data = mRMR_data, target_indices = c(ncol(traindf)), feature_count = 20)                        
+bestVars <-data.frame("features" = names(traindf)[solutions(feats)[[1]]], "scores" = scores(feats)[[1]])
+
+print(bestVars)
+```
+
+So, how did we do with our 10 best? Here’s something new, we’ll try with both a GLMNET model and a k-nearest neighbors algorithm (KNN) model (a very easy switch using the caret package):
+
+```{r glmnet, warning=FALSE, message=FALSE}
+traindf_temp <- traindf[c(as.character(bestVars$features), "cluster")] 
+# caret requires a factor of non-numeric value 
+traindf_temp$cluster <- ifelse(traindf_temp$cluster == 1, "yes", "no") 
+traindf_temp$cluster <- as.factor(traindf_temp$cluster) 
+objControl <- trainControl(method="cv", number=3, returnResamp="none", summaryFunction = twoClassSummary, classProbs = TRUE) 
+glmnet_model <- train(cluster~., data = traindf_temp, method="glmnet", metric="roc", trControl=objControl) 
+glmnet_predictions <- predict(object=glmnet_model, newdata = gisette_df_validate[,as.character(bestVars$features)], type='raw') 
+
+# caret requires a factor of non-numeric value 
+gisette_df_validate$cluster <- ifelse(gisette_df_validate$cluster == 1, "yes", "no")
+gisette_df_validate$cluster <- as.factor(gisette_df_validate$cluster)
+print(postResample(pred=glmnet_predictions, obs=gisette_df_validate$cluster))
+```
+
+```{r knn, warning=FALSE, message=FALSE}
+knn_model <- train(cluster~., data=traindf_temp, method="knn", metric='roc', trControl=objControl) 
+knn_predictions <- predict(object=knn_model, newdata =gisette_df_validate[,as.character(bestVars$features)], type='raw')
+print(postResample(pred=knn_predictions, obs=as.factor(gisette_df_validate$cluster)))
+```
+
+Here is another interesting feature of the mRMRe library, it can run an ensemble of smaller sampled sets of the data set and return the importance of each feature for each run.
+
+```{r}
+# ensemble example 
+feats <- mRMR.ensemble(data = mRMR_data, target_indices = c(ncol(traindf)), solution_count = 5,feature_count = 10) 
+bestVars <-data.frame('features'=names(traindf)[solutions(feats)[[1]]], 'scores'= scores(feats)[[1]]) 
+print(bestVars)
+```
+

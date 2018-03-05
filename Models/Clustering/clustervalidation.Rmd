@@ -1,0 +1,165 @@
+---
+title: "Cluster Validation Statistics"
+output: html_document
+---
+
+There are 3 ways to evaluate the goodness of clustering algorithm results:
+
+1. Internal Cluster Validation
+2. External Cluster Validation
+3. Relative Cluster Validation  (Skipped)
+
+Recall that the goal of partitioning clustering algorithms is to split the data into clusters of objects such that:
+
+- the objects in the same cluster are as similar as possible
+- the object in different clusters are highly distinct
+
+> Minimize the average distance in a cluster and maximize the distance between clusters
+
+### Get Data
+
+```{r warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("factoextra", "fpc", "NbClust",  prompt = FALSE)
+
+df <- iris[,-5]
+df <- scale(df)
+```
+
+### Clustering Analysis Revisited
+
+We have performed clustering analysis previously.  We will use new functions to perform clustering analysis.  While there is overlap with the work we have already completed, these tools also provide silhouette information.  This introduces *eclust()* (enhanced clustering in the *factoextra* package) that provides many useful advantages:
+
+- Simplifies clustering analysis
+- Can compute hierarchical and partition clustering in a single line of code
+- *eclust()* automatically computes the gap statistic for estimating the right number of clusters
+- As mentioned, it provides silhouette information
+- Beautiful visualizations
+
+Lets explore *eclust()*.
+
+```{r}
+kmeans <- eclust(df, "kmeans", k=3, nstart=25, graph = FALSE)#graph = TRUE provides a visualiztion, just not as nice as below
+fviz_cluster(kmeans, geom="point", ellipse.type = "norm", palette = "jco", ggtheme=theme_minimal())
+```
+
+```{r}
+hc <- eclust(df, "hclust", k=3, hc_metric = "euclidean", hc_method = "ward.D2", graph = FALSE)#graph = TRUE provides a visualiztion, just not as nice as below
+fviz_dend(hc, geom="point", show_labels = FALSE, palette = "jco", as.ggplot=TRUE)
+```
+
+### Internal Cluster Validation
+
+There are two commonly used indices for assessing the goodness of clustering:
+
+1. Silhouette Coefficient
+2. Dunn Index
+
+#### Silhouette Coefficient
+
+Skipping the math, The Silhouette Coefficient is interpreted as follows:
+
+- Observations with a large S~1~ (almost 1) are well clustered
+- A small S~1~ (around 0) means the observation lies between two classes
+- Observations with a negative S~1~ are likely in the wrong cluster
+
+Now is time to test the goodness of fit using the Silhouette Coefficient:
+
+```{r}
+fviz_silhouette(kmeans, palette = "jco", ggtheme = theme_classic())
+```
+
+Lets also get some specific silhouette information:
+
+```{r}
+silinfo <- kmeans$silinfo
+names(silinfo)
+#Widths of each observation"
+head(silinfo$widths[,1:3], 10)
+#Ave width"
+silinfo$clus.avg.widths
+#Total ave (mean of all indiv widths)
+silinfo$avg.width
+#The size of each cluster"
+kmeans$size
+```
+
+Recall observations with a large S~1~ (almost 1) are well clustered.  Examine the plot - cluster 2.  Do you see the negative values?  This means these observations are in the wrong cluster.  We can find the name of these samples and determine the clusters they are closer to:
+
+```{r}
+sil <- kmeans$silinfo$widths[,1:3]
+print("Objects with negative silhouette")
+neg_sil_index <- which(sil[, "sil_width"] < 0)
+sil[neg_sil_index, , drop=FALSE]
+```
+
+#### Dunn Index
+
+The Dunn Index is the ratio of the smallest distance between observations not in the same cluster to the largest intra-cluster distance. The Dunn Index has a value between zero and infinity, and should be maximized.
+
+The function *cluster.stats()* from the fpc package and the *NbClust()* in the eponymously named package can be used to compute the Dunn Index.
+
+```{r}
+kmeans_stats <- cluster.stats(dist(df), kmeans$cluster)
+#Dun Index
+kmeans_stats$dunn
+
+#Much more detail is availble:
+#kmeans_stats
+```
+
+### External Cluster Validation
+
+This is computed using the *Rand Index* which varies between -1 (no agreement) to 1 (perfect agreement).  The Rand Index provides a measure for assessing similarity between two partitions adjusted for chance.  
+
+Among the values returned by *cluster.stats* are two indices that asses the similarity of clusters:  Rand Index and Meila's VI.
+
+We know iris has 3  groups of species.  Does the K-Means clustering match the true stricture of the data?  Lets find out.  Compute a cross-tabulation between K-Means and the reference Species label:
+
+```{r}
+table(iris$Species, kmeans$cluster)
+```
+
+This table shows:
+
+- All setosa species are in cluster 1
+- A large number of versicor species are in cluster 3, however 11 have are in cluster 2
+- A large number of virginica species are in cluster 2 but 14 are in cluster 3
+
+Lets quantify the agreement between Species and K-Means using the Rand Index and Meila's VI:
+
+```{r}
+#Compute cluster stats
+species <- as.numeric(iris$Species)
+cluster_stats <- cluster.stats(d=dist(df), species, kmeans$cluster)
+
+#Corrected Rand Index
+cluster_stats$corrected.rand
+
+#VI
+cluster_stats$vi
+```
+
+Agreement between the specie types and the cluster solution is 0.62 using Rand Index and 0.748 using Meila's VI.  The same analysis can be computed for PAM (Partitioning Around Medoids) and hierarchical clustering.
+
+(The PAM algorithm was developed by Leonard Kaufman and Peter J. Rousseeuw, and this algorithm is very similar to K-means, mostly because both are partitional algorithms, in other words, both break the dataset into groups (clusters), and both work by trying to minimize the error, but PAM works with Medoids, that are an entity of the dataset that represent the group in which it is inserted, and K-means works with Centroids, that are artificially created entity that represent its cluster.)
+
+```{r}
+#Agreement between species and pam clusters
+pam <- eclust(df, "pam", k=3, graph=FALSE)
+table(iris$Species, pam$cluster)
+cluster.stats(d=dist(df), species, pam$cluster)$vi
+
+#Agreement bwtween species and HC clusters
+hc <- eclust(df, "hclust", k=3, graph=FALSE)
+table(iris$Species, hc$cluster)
+cluster.stats(d=dist(df), species, hc$cluster)$vi
+```
+
+##Appendix
+
+Here is more detailed information on other clustering analysis options:
+
+- https://cran.r-project.org/web/packages/clv/clv.pdf
+

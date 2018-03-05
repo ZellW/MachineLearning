@@ -1,0 +1,415 @@
+---
+title: "Cutoff Value for Unbalanced Dataset"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+---
+
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 12px;
+}
+body{ /* Normal  */
+   font-size: 12px;
+}
+td {  /* Table  */
+   font-size: 12px;
+}
+h1 { /* Header 1 */
+ font-size: 24px;
+}
+h2 { /* Header 2 */
+ font-size: 20px;
+}
+h3 { /* Header 3 */
+ font-size: 18px;
+}
+code.r{ /* Code block */
+  font-size: 10px;
+}
+pre { /* Code block */
+  font-size: 10px
+}
+</style>
+
+```{r runOnce, echo=FALSE, eval=FALSE}
+devtools::install_github('cttobin/ggthemr')
+if(!require(psych)){install.packages("psych")}
+
+devtools::install_github("ricardo-bion/ggradar", dependencies=TRUE)
+# requires font to work without warning messages
+https://github.com//ricardo-bion//ggtech//blob//master//Circular%20Air-Light%203.46.45%20PM.ttf
+extrafont::font_import(pattern = 'Circular', prompt=FALSE)
+```
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr", "dplyr", "tidyr", "ROCR", "grid", "broom", "caret", "scales", "ggplot2", "ggthemes", 
+         "gridExtra", "data.table", "e1071", "broom", "extrafont", prompt = FALSE)
+library(ggthemr)
+```
+
+This document is focused on choosing the optimal cutoff value for logistic regression when dealing with unbalanced dataset. This also applies to other classification algorithms where the model's prediction on unknown outcome can be a probability.
+
+# Logistic Regression Defined 
+
+Logistic regression is a technique that is well suited for binary classification problems. After giving the model your input parameters (or called variables, predictors), the model will calculate the probability that each observation will belong to one of the two classes ( depending on which one you're choosing as the "positive" class). The math formula of this regression : 
+
+$$ P(y) = \frac{1}{ 1 + e^{ -( B_0 + B_1X_1 + \dots + B_nX_n ) } } $$
+
+Where $P(y)$ is the calculated probability ; the $B$s denotes the model's parameters and $X$s refer to your input parameters.
+
+# Problem Description
+
+Given an HR dataset, identify the employees most likely to leave in the future.  
+
+```{r, message=FALSE, warning=FALSE}
+# read in the dataset ("HR.csv")
+data <- fread("../PreProcessing/data/HR.csv")#fread is from data.table
+str(data)
+```
+This dataset contains `r nrow(data)` observations and `r ncol(data)` variables, each representing :
+
+- `S` The satisfaction level on a scale of 0 to 1.   
+- `LPE` Last project evaluation by a client on a scale of 0 to 1.   
+- `NP` Represents the number of projects worked on by employee in the last 12 month.  
+- `ANH` Average number of hours worked in the last 12 month for that employee.  
+- `TIC` The amount of time the employee spent in the company, measured in years.  
+- `Newborn` This variable will take the value 1 if the employee had a newborn within the last 12 month and 0 otherwise.  
+- `left` 1 if the employee left the company, 0 if they're still working here.
+
+Do a quick summary to check if columns contain missing values like NAs and requires cleaning. Also use the `findCorrelation` to determine if there are any variables that are highly correlated with each other so we can remove them from the model training.
+
+```{r}
+summary(data)
+# find correlations to exclude from the model 
+caret::findCorrelation(cor(data), cutoff = .75, names = TRUE)
+```
+
+The dataset is clean.  Look at the proportion of employees that have left the company.
+
+```{r}
+prop.table(table(data$left))
+```
+
+This probability table tells you that 16 percent of the employees who became a staff member of yours have left! If those employees are all the ones that are performing well in the company, then you're company is probably not going to last long. Use the logistic regression model to train our dataset to see if we can find out what's causing employees to leave.
+
+# Model Training 
+
+To train and evaluate the model, split the dataset into two parts. `Newborn` is converted to factor type.
+
+```{r}
+# convert the newborn to factor variables
+data[ , Newborn := as.factor(Newborn) ]
+
+set.seed(4321)
+test <- createDataPartition(data$left, p = .2, list = FALSE)
+data_train <- data[-test, ]
+data_test  <- data[test, ]
+rm(data)
+
+# training logistic regression model
+model_glm <- glm(left ~., data = data_train, family = binomial(logit))
+summary_glm <- summary(model_glm)
+```
+```{r}
+list(summary_glm$coefficient, round(1 - (summary_glm$deviance/summary_glm$null.deviance), 2))
+```
+
+- p-values:  Values below .05 indicates significance meaning the coefficient estimated by our model are reliable. 
+- pseudo R square: This value ranges from 0 to 1 indicating how much variance is explained by our model (this is equivalent to the R squared value in linear regression)..
+
+The p-values of the model indicates significance suggesting the model is legitimate. A pseudo R square of `r round(1 - (summary_glm$deviance/summary_glm$null.deviance), 2)` tells that only `r round( 1 - (summary_glm$deviance/summary_glm$null.deviance), 2) * 100` percent of the variance is explained. In other words, it is telling us that the model is not good enough to predict employees that left with high reliability. Since this is more of a dataset problem (suggests collecting other variables to include to the dataset) and there is not much we can do about it at this stage, simply move on to the next part where we look at the predictions made by the model.
+
+# Predicting & Assessing the Model 
+
+Get the predicted value that a employee will leave in the future on both training and testing set.  Then perform a quick evaluation on the training set by plotting the probability (score) estimated by our model with a double density plot. 
+
+```{r, message=FALSE, warning=FALSE}
+# prediction
+data_train$prediction <- predict(model_glm, newdata = data_train, type = "response")
+data_test$prediction  <- predict(model_glm, newdata = data_test , type = "response")
+
+# distribution of the prediction score grouped by known outcome
+ggplot(data_train, aes(prediction, color = as.factor(left))) + geom_density(size = 1) +
+ggtitle("Training Set Predicted Score") + scale_color_economist(name = "data", 
+      labels = c("negative", "positive")) + theme_economist()
+```
+
+Given our objective is to classify new instances into one of two categories (whether the employee will leave or not), we  want the model to give high scores to positive instances (1: employee that left) and low scores (0 : employee that stayed).  
+
+For a double density plot the distribution of scores to be separated with the score of the negative instances will be on the left and the score of the positive instance to be on the right.   
+
+In the current case, both distributions are slight skewed to the left. Not only is the predicted probability for the negative outcomes low, but the probability for the positive outcomes are also lower than it should be. The reason for this is because our dataset only consists of 16 percent of positive instances (employees that left). Therefore the predicted scores get pulled towards a lower number because of the majority of the data being negative instances.
+
+Our *skewed* double density plot actually tells us sometihng important: **Accuracy will not be a suitable measurement for this model.**
+
+Since the prediction of a logistic regression model is a probability, in order to use it as a classifier, we must choose a cutoff value (a threshold value). Where scores above this value will classified as positive and those below as negative.
+
+Use a function to loop through several cutoff values and compute the model's accuracy on both training and testing set.
+
+`AccuracyCutoffInfo` gets the accuracy on the training and testing dataset for cutoff value ranging from .4 to .8 (with a .05 increase). The input parameters are: 
+
+- `train`: data.table or data.frame type training data.  Assumes the predicted score and actual outcome are in it.    
+- `test`: conditions the same as above for the test set.    
+- `predict`: predicted score column name (the same for both train and test set) is a character.   
+- `actual`: conditions the same as above for the actual result column name.    
+- The function returns a list consisting of :          
+    - data : data.table with three columns. Each row indicates the cutoff value and the accuracy for the train and test set respectively.   
+    - plot : a single plot that visualizes the data.table.   
+
+```{r, message=FALSE, warning=FALSE}
+# functions are sourced in, to reduce document's length
+source("../PreProcessing/unbalanced_functions.R")
+accuracy_info <- AccuracyCutoffInfo(train = data_train, test = data_test, predict = "prediction", actual = "left")
+# define the theme for the next plot
+ggthemr("light")
+accuracy_info$plot
+```
+
+Starting from the cutoff value of .6, our model's accuracy for both training and testing set grows higher and higher showing no sign of decreasing at all. 
+
+Use another function to visualize the confusion matrix of the test set to see what is causing this. 
+
+Use `ConfusionMatrixInfo`to obtain the confusion matrix plot and data.table for a given dataset that has the predicted score and actual outcome column.
+
+- `data`: data.table or data.frame type data that includes the column of the predicted score and actual outcome. 
+- `predict`: prediction column name as a character.
+- `actual`: conditions same as above for the actual result column name.
+- `cutoff`: cutoff value for the prediction score.
+- The function returns a list consisting of :
+    - data : data.table consisting of three columns. 
+     - First two columns stores the original value of the prediction and actual outcome from the passed in data frame. 
+     - The third indicates the type which is after choosing the cutoff value.  This will a true/false positive/negative. 
+     - plot : Plot visualizing the data.table.
+
+```{r, fig.height=7, fig.width=10, message=FALSE, warning=FALSE}
+# visualize .6 cutoff (lowest point of the previous plot)
+cm_info <- ConfusionMatrixInfo(data = data_test, predict = "prediction", actual = "left", cutoff = .6)
+ggthemr("flat")
+cm_info$plot
+```
+
+The predicted scores are jittered along their predicted label (along the 0 and 1 outcome). When visualizing a large number of individual observations, displaying each outcome with jitter so we can spread the points along the x axis. Without jittering, you would see two vertical lines with many of points overlapped on each other. 
+
+The above plot depicts the trade-off we face when selecting a cutoff. If we increase the cutoff value, the number of true negative (TN) increases and the number of true positive (TP) decreases. Alternatively, increasing the cutoff value, the number of false positive (FP) is lowered while the number of false negative (FN) rises. 
+
+Because we have very few positive instances in our dataset, our model will be less likely to make a false negative mistake. Iif we keep on adding the cutoff value, we increase our model's accuracy since we have a higher chance of turning the false positive into true negative.
+
+Given our test set, we'll simply predict every single observation as a negative instance (0: meaning this employee will not leave in the near future). 
+
+```{r}
+# predict all the test set's outcome as 0
+prop.table( table( data_test$left ) )
+```
+
+We still get a 84 percent accuracy which is pretty much the same compared to our logistic model.
+
+> Accuracy is not the suitable indicator for the model when you have unbalanced distribution or costs.
+
+# Choose Cutoff Value 
+
+Because accuracy isn't suitable, use another measurement to decide an optimal cutoff value - the [ROC curve](https://en.wikipedia.org/wiki/Receiver_operating_characteristic).
+
+When choosing our cutoff value, balance between the false positive rate (FPR) and false negative rate (FNR).  This is the objective where we are minimizing the number of mistakes - the cost. The ROC curve purpose is used to visualize and quantify the trade-off between the two measures. This curve is created by plotting the true positive rate (TPR) on the y axis with the false positive rate (FPR) on the x axis.
+
+Use the data returned by the `ConfusionMatrixInfo` to another function to calculate and return a ROC plot.
+
+```{r}
+print(cm_info$data)
+```
+
+Use `ROCInfo` to pass in the data that includes the predicted score and actual outcome column to obtain the ROC curve information. The input parameters are:
+
+- `data`: data.table or data.frame type data that has predicted score and actual outcome.
+- `predict`: predicted score column name.
+- `actual`: actual result column name.
+- `cost.fp`: cost for a false positive instance. 
+- `cost.fn`: cost for a false negative instance. 
+- The function returns a list consisting of : 
+    - plot : A side by side roc and cost plot with a title showing optimal cutoff value, total cost and area under the curve (auc). Wrap the `gride.draw` function around the plot to visualize it.
+    - cutoff : : optimal cutoff value according to the specified FP and FN cost .
+    - totalcost : total cost according to the specified FP and FN cost.
+    - auc : area under the curve.
+    - sensitivity : TP / (TP + FN) for the optimal cutoff.
+    - specificity : TN / (FP + TN) for the optimal cutoff.
+    
+The costs of false positive mistakes (FP) and a false negative (FN) mistakes are typically different.  Committing a false negative (FN) is usually more costly than a false positive (FP). 
+
+- A false negative (FN) means that an employee left our company but our model fails to detect.  
+- A false positive (FP) means that an employee is still currently working at our company and the model suggests they will likely leave. 
+
+The former mistake would be a costly because the employee left and the company did not do anything about it.  A FP mistake may only waste a few minutes of HR time with an interview with a employee - no real cost. 
+
+```{r, fig.height=6, fig.width=10}
+ggthemr_reset()# reset to default ggplot theme 
+# user-defined different cost for false negative and false positive
+cost_fp <- 100
+cost_fn <- 200
+roc_info <- ROCInfo( data = cm_info$data, predict = "predict", 
+					 actual = "actual", cost.fp = cost_fp, cost.fn = cost_fn )
+grid.draw(roc_info$plot)
+```
+
+1. The title of the plot tells us when we assign the cost for a false negative (FN) and false positive (FP) to be 100 and 200 respectively, our optimal cutoff is actually `r round( roc_info$cutoff, 2 )` and the total cost for choosing this cutoff value is `r comma(roc_info$totalcost)`. 
+2. The the ROC curve on the left illustrates the trade off between the rate at which you correctly predict with the rate of incorrectly predicting something when choosing different cutoff values. 
+3. Also calculated the area under this ROC curve (auc) to be `r round( roc_info$auc, 3 )`. This measure ranging from 0 to 1, informs how well is the classification model is performing where the higher the number the better. The tilted blue line sets the boundary of an average model, with a .5 area under the curve.
+4. The cost plot on the right calculates the the associated cost for choosing different cutoff value. 
+5. For both plots, the cyan color dotted line denotes where that optimal point lies for the cost plot.  This shows the optimal cutoff value. 
+6. The ROC curve plot indicates the location of the false positive rate (FPR) and true positive rate (TPR) corresponding to the optimal cutoff value. 
+7. The color on the curve denotes the cost associated with that point, <span style="color:green">"greener"</span> means that the cost is lower while "blacker" means higher cost. 
+
+Replot the confusion matrix to see the effect of switching to the cutoff value.
+
+```{r, fig.height=7, fig.width=10, message=FALSE, warning=FALSE}
+# re-plot the confusion matrix plot with the new cutoff value
+cm_info <- ConfusionMatrixInfo( data = data_test, predict = "prediction", 
+                                actual = "left", cutoff = roc_info$cutoff )
+ggthemr("flat")
+cm_info$plot
+```
+
+The confusion matrix plot illustrates that changing the cutoff value to `r round( roc_info$cutoff, 2 )` our classification model is making less false negative (FN) errors since the cost associated with it is `r cost_fn/cost_fp` times higher than a false positive (FP). 
+
+## Interpretation and Reporting 
+
+Returning to the logistic regression model,look at the estimated parameters (coefficients). Since the model's parameter the recorded in logit format, transform it into odds ratio so it is easier to interpret. 
+
+```{r}
+# tidy from the broom package
+coefficient <- tidy(model_glm)[ , c("term", "estimate", "statistic")]
+
+# transfrom the coefficient to be in probability format 
+coefficient$estimate <- exp(coefficient$estimate)
+coefficient
+```
+
+With all other input variables unchanged, every unit of increase in the satisfaction level increases the odds of leaving the company (versus not leaving) by a factor of `r round(coefficient[ coefficient$term == "S", "estimate" ], 2)`.
+
+With the logistic regression model, load in the dataset with unknown actual outcomes and predict the probabilities.
+
+```{r}
+# set the column class 
+col_class <- sapply( data_test, class )[1:6]
+# use the model to predict a unknown outcome data "HR_unknown.csv"
+data <- fread("../PreProcessing/data/HR_Unknown.csv")#fread is from data.table
+data[ , Newborn := as.factor(Newborn)]
+# predict
+data$prediction <- predict(model_glm, newdata = data, type = "response")
+list(head(data), nrow(data))
+```
+
+After predicting how likely each employee is to leave the company, use the cutoff value to determine who the company should pay attention.
+
+```{r}
+# cutoff
+data <- data[data$prediction >= roc_info$cutoff, ]
+list(head(data), nrow(data))
+```
+
+Using the cutoff value of `r round( roc_info$cutoff, 2 )` we have decrease the number of employees that we might have to take actions upon to prevent them from the leaving the company to `r nrow(data)`. 
+
+Given these estimated probabilities, there are two notable lessons learned illustrated through visualization:
+
+1. The relationship between the **t**ime spent **i**n the **c**ompany (TIC) with the probability that they will leave the company (attrition). We compute the median attrition rate for each value of `TIC` and the number of employees for each value of `TIC`. 
+
+```{r, message=FALSE, warning=FALSE}
+# compute the median estiamted probability for each TIC group
+median_tic <- data %>% group_by(TIC) %>% summarize(prediction = median(prediction), count = n())
+ggthemr("fresh")
+ggplot(median_tic, aes(TIC, prediction, size = count)) + geom_point() + theme( legend.position = "none" ) +
+     labs(title = "Time and Employee Attrition", y = "Attrition Probability", x = "Time Spent in the Company") 
+```
+
+1. The probabilities suggests the of an employee leaving the company is positively correlated with the time spent in the company. It suggests the company cannot retain longer-term employees. In marketing, it makes sense at some point if your customers are loyal to you after many years, then they will most likely stay loyal forever. For our human resource example, failing to retain "loyal" employees could mean the company failed to propose a career plan to the employees. The point's (bubble) size shows that this is not a rare case.
+2. The relationship between `LPE` **l**ast **p**roject **e**valuation by client and the estimated probability to leave. Unlike `TIC` that has only five different values, `LPE` is a numeric index ranging from 0 to 1.  To plot it like the last one, use `cut` to split `LPE` variable into 4 groups. 
+
+```{r, message=FALSE, warning=FALSE}
+data$LPECUT <- cut(data$LPE, breaks = quantile(data$LPE), include.lowest = TRUE)
+median_lpe <- data %>% group_by(LPECUT) %>% 
+					   summarise(prediction = median(prediction), count = n())
+
+ggplot(median_lpe, aes( LPECUT, prediction)) + geom_point(aes(size = count), color = "royalblue3") +
+     theme(legend.position = "none") + labs(title = "Last Project's Evaluation and Employee Attrition", 
+	  y = "Attrition Probability", x = "Last Project's Evaluation by Client")
+```
+
+The plot illustrates the relationship between LPE and the estimated probability is not correlated. This suggests it might be worthwhile to try other classification algorithms. Logistic regressions assumes monotonic relationships (either entirely increasing or decreasing) between the input parameters and the outcome (also true for linear regression). If more of a thing is good then more of the thing is better.  This is often not the case in real use cases.
+
+Returning to the employee attrition example, we can prioritize our actions by adding back how much do we want to retain  employees. From the dataset, we know the performance information of the employee and LPE. With this, create a visualization: 
+
+```{r, message=FALSE, warning=FALSE}
+ggplot( data, aes( prediction, LPE ) ) + geom_point() + ggtitle( "Performance vs Probability to Leave" )
+```
+
+- The underperforming employees (lower y axis), the company should improve their performance or let them to leave.
+- For employees that are not likely to leave (lower x axis), manage them as usual if short on resources.
+- Focus on those with a good performance but with a high probability to leave.
+
+Quantify the priorities by multiplying the probability to leave with the performance. The higher scores identify employees that should be helped quickly.
+
+```{r}
+result <- data %>% mutate( priority = prediction * LPE ) %>%  mutate( id = rownames(data) ) %>%
+		  arrange( desc(priority) )
+head(result)
+```
+
+**Conclusion:**
+
+Using a classification algorithm like logistic regression enabled us to detect events that will happen in the future - which employees are more likely to leave the company. Based on this information, we can develop a strategy to manage the emplyees. 
+
+> **Takeaway**: If the data is unbalanced, do not use accuracy as the measurement to evaluate model performance 
+
+# Extend Example Using Clustering
+
+```{r dataPrepCluster}
+# scale the data (you don't really need to do this when comparing correlations)
+# this is used for latter plotting and applying clustering
+data_hr1 <- select(data_test, -c(left, prediction))
+data_hr1$Newborn <- as.integer(data_hr1$Newborn)
+#data_hr2 <- fread(choose.files())
+scaled1 <- scale(data_hr1)
+data_hr_scaled1 <- data.table(scaled1)
+findCorrelation(cor(data_hr_scaled1), cutoff = 0.25, names = TRUE)
+```
+
+```{r message=FALSE, warning=FALSE}
+ggplot(melt(data_hr_scaled1[ , c("LPE", "NP"), with = FALSE ]), 
+        aes(value, fill = variable)) + 
+geom_histogram(alpha = .4, position = "identity")
+```
+
+```{r}
+# clustering 
+d <- dist(data_hr_scaled1[ , -1, with = FALSE], method = "euclidean") 
+cluster <- hclust(d, method = "ward.D")
+plot(cluster) # dendogram
+data_hr_scaled1[ , groups := as.factor(cutree(cluster, k = 4))]
+```
+
+```{r}
+# median aggregation 
+hr_agg <- data_hr_scaled1[ , lapply(.SD, median), by = groups]
+
+# order by cluster's proportion size
+t <- table(data_hr_scaled1$groups)
+hr_agg[ , proportion := t/sum(t) ][ order(-proportion) ]
+```
+
+
+```{r}
+hr_agg2 <- hr_agg[ , -c( "groups", "proportion" ), with = FALSE]
+hr_agg2 <- hr_agg2[ , lapply( .SD, rescale)]
+hr_agg2[ , groups := as.factor( paste0( "group", 1:nrow(hr_agg2)))]
+```
+
+```{r message=FALSE, warning=FALSE}
+library(ggradar)
+name <- colnames(hr_agg2)
+setcolorder(hr_agg2, c("groups", name[ name != "groups" ]))
+
+# radar plot
+ggradar(hr_agg2)
+```
+
+

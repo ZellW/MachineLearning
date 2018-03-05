@@ -1,0 +1,343 @@
+---
+title: "Introductory Machine Learning Using R"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    depth: 4
+    toc: yes
+    toc_float: yes
+---
+
+```{r echo=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+# Regression
+
+```{r linearRegression, child = 'linearRegression.Rmd'}
+rm(list=ls())
+```
+
+## Support Vector Regression
+
+```{r child = 'supportVectorRegession.Rmd'}
+rm(list=ls())
+```
+
+## Decision Tree Regression
+
+```{r child = 'decisionTreeRegression.Rmd'}
+rm(list=ls())
+```
+
+## Random Forest Regression
+
+```{r child = 'randomForestRegression.Rmd'}
+rm(list=ls())
+```
+
+## Evaluating Regression
+
+```{r, out.width = "800px", echo=FALSE}
+knitr::include_graphics("./images/Regression1.JPG")
+knitr::include_graphics("./images/regressionSummary1.JPG")
+```
+
+Notice the model in the lower left is best performing - examine the adjusted R^2 value
+
+```{r, out.width = "600px", echo=FALSE}
+knitr::include_graphics("./images/regressionSummary2.JPG")
+```
+
+Always evaluate coefficients carefully.  Holding all else constant, for every *unit* of R.D.Spend, your dependent variable - Profit - will increase by .7966 cents.  (Profit and R.D.Spend both expressed as dollars.)
+
+## Regularization
+
+Regularization is a technique used in an attempt to solve the over fitting problem in statistical models.
+
+The regularization parameter lambda and the penalty parameter C are hyperparameters. Can use these to optimize the models.  Grid Search helps find the optimal values.  Using the Caret package provides this optimization.
+
+L1 (Lasso) regularization helps perform feature selection in sparse feature spaces, and that is a good practical reason to use L1 in some situations. However, beyond that particular reason I have never seen L1 to perform better than L2 (Ridge) in practice. Even in a situation where you might benefit from L1's sparsity in order to do feature selection, using L2 on the remaining variables is likely to give better results than L1 by itself.
+
+#Classification
+
+## Logistic Regression
+
+```{r child = 'logisticRegression.Rmd'}
+rm(list=ls())
+```
+
+## k-NN Classification
+
+```{r child = 'kNN.Rmd'}
+rm(list=ls())
+```
+
+## SVM Classification
+
+```{r child = 'SVMclassification.Rmd'}
+rm(list=ls())
+```
+
+## SVM Kernal Classification
+
+```{r child = 'SVMkernel.Rmd'}
+rm(list=ls())
+```
+
+## Naive Bayes Classification
+
+```{r child = 'naiveBayes.Rmd'}
+rm(list=ls())
+```
+
+## Decision Tree Classification
+
+```{r child = 'decisionTreeClassification.Rmd'}
+rm(list=ls())
+```
+
+## Random Forest Classification
+
+```{r child = 'randomForestClassification.Rmd'}
+rm(list=ls())
+```
+
+## Evaluating Classification Models Performance
+
+### False Positives & Negatives
+
+```{r out.width = "600px", echo=FALSE}
+knitr::include_graphics("./images/positiveNegative.JPG")
+```
+
+False Negatives (Type II) can be worse than Type I.  Predicting an earthquake will not happen and it does happen is much worse than the converse.
+
+### Confusion Matrix
+
+```{r out.width = "400px", echo=FALSE}
+knitr::include_graphics("./images/cm.JPG")
+```
+
+### Accuracy Paradox
+
+Look at the plot below.  Since the accuracy is 98%, we could just tell the model to stop making predictions altogether since the accuracy is so high.  Simply always assume the event will never occur (always be 0).
+
+```{r out.width = "400px", echo=FALSE}
+knitr::include_graphics("./images/accuracyParadox2.JPG")
+```
+
+Simply always assume the event will never occur (always be 0).  Then the confusion matrix looks like this:
+
+```{r out.width = "400px", echo=FALSE}
+knitr::include_graphics("./images/accuracyParadox.JPG")
+```
+
+The accuracy rate went up - that makes no sense.  Therefore you should not always rely only on accuracy.  The way to avoid this is explained below.
+ 
+### CAP (Cumulative Accuracy Profile) Curve
+
+As an example, we know that 10% of customers will respond to an email campaign.  If we create models to identify the users most likely to respond, we can increase the area under the curve.
+
+```{r out.width = "800px", echo=FALSE}
+knitr::include_graphics("./images/capCurve.JPG")
+```
+
+> CAP != ROC
+
+### CAP Curve Analysis
+
+Rule of thumb (this is a personal intuition):
+
+```{r out.width = "800px", echo=FALSE}
+knitr::include_graphics("./images/capCurve2.JPG")
+```
+
+If Too Good - overfitting!
+
+## Classification Summary
+
+```{r out.width = "800px", echo=FALSE}
+knitr::include_graphics("./images/Classification1.JPG")
+```
+
+How do I know which model to choose for my problem?
+
+- Same as for regression models, you first need to figure out whether your problem is linear or non linear. (See below in Model Selection)  
+- If your problem is linear, you should go for Logistic Regression or SVM.
+- If your problem is non linear, you should go for K-NN, Naive Bayes, Decision Tree or Random Forest.  (See below in Model Selection with k-Fold Cross Validation)
+- Logistic Regression or Naive Bayes when you want to rank your predictions by their probability.  For example if you want to rank your customers from the highest probability that they buy a certain product, to the lowest probability. Eventually that allows you to target your marketing campaigns. And of course for this type of business problem, you should use Logistic Regression if your problem is linear, and Naive Bayes if your problem is non linear.
+- SVM when you want to predict to which segment your customers belong to. Segments can be any kind of segments, for example some market segments you identified earlier with clustering. 
+- Decision Tree when you want to have clear interpretation of your model results,
+- Random Forest when you are just looking for high performance with less need for interpretation.  
+
+# Clustering
+
+Clustering is similar to classification, but the basis is different. In Clustering you don’t know what you are looking for, and you are trying to identify some segments or clusters in your data. When you use clustering algorithms on your dataset, unexpected things can suddenly pop up like structures, clusters and groupings you would have never thought of otherwise.
+
+## k-Means Clustering
+
+```{r child = 'kMeansClustering.Rmd'}
+rm(list=ls())
+```
+
+## k-Means Clustering Example 2
+
+```{r child = 'kMeansClustering2.Rmd'}
+rm(list=ls())
+```
+
+## Hierarchial Clustering
+
+```{r child = 'hierarchialClustering.Rmd'}
+rm(list=ls())
+```
+
+## Cluster Tendency
+
+```{r echo=FALSE}
+pkgs = names(sessionInfo()$otherPkgs)
+pkgs = paste('package:', pkgs, sep = "")
+lapply(pkgs, detach, character.only = TRUE, unload = TRUE, force=TRUE)
+#Attempt to prevent an error running clustertendency.Rmd below
+```
+
+```{r child = 'clustertendency.Rmd'}
+rm(list=ls())
+```
+
+## Cluster Validation Statistics
+
+```{r child = 'clustervalidation.Rmd'}
+rm(list=ls())
+```
+
+## Choosing the Best Algo
+
+```{r child = 'clusterselectalgo.Rmd'}
+rm(list=ls())
+```
+
+## Clustering Algorithm Alternatives
+
+```{r child = 'clusterAlternatives.Rmd'}
+rm(list=ls())
+```
+
+## NbClust - Finding Optimal Number of Clusters - Code Examples
+
+```{r child = 'clusterDbClustExamples.Rmd'}
+rm(list=ls())
+```
+
+## Clustering Summary
+
+```{r, out.width = "800px", echo=FALSE}
+knitr::include_graphics("./images/Clustering1.JPG")
+```
+
+> k_Means performs better than Hierarchial Clustering on large datasets.
+
+# Association Rule Learning
+
+## Apriori
+
+```{r child = 'associationRules.Rmd'}
+rm(list=ls())
+```
+
+## Eclat
+
+```{r child = 'eclat.Rmd'}
+rm(list=ls())
+```
+
+# Reinforcement Learning
+
+```{r child = 'reinforcement.Rmd'}
+rm(list=ls())
+```
+
+# Natural Language Processing
+
+```{r child = 'nlp.Rmd'}
+rm(list=ls())
+```
+
+# Deep Learning
+
+## Artificial Neural Networks
+
+```{r child = 'deepLearningANN.Rmd'}
+```
+
+```{r echo=FALSE}
+# pkgs = names(sessionInfo()$otherPkgs)
+# pkgs = paste('package:', pkgs, sep = "")
+# lapply(pkgs, detach, character.only = TRUE, unload = TRUE, force=TRUE)
+# #To avoid errors, attempting to clear all packages to doc knits w/o error
+```
+
+## Convolutional Neural Networks
+
+MORE WORK TO DO USING MXNET
+
+```{r child = 'deepLearningCNN.Rmd'}
+```
+
+## Recurrent Neural Networks
+
+NEED TO DO
+
+https://github.com/bquast/rnn
+
+# Dimensionality Reduction
+
+## Introduction
+
+There are two types of Dimensionality Reduction techniques:
+
+1. Feature Selection
+2. Feature Extraction
+
+Feature Selection techniques are Backward Elimination, Forward Selection, Bidirectional Elimination, Score Comparison and more. We this in Regression.
+
+In this part we will cover the following Feature Extraction techniques:
+
+1. Principal Component Analysis (PCA)
+     - From the m independent variables of your dataset, PCA extracts p <= m new independent variables that explain the most of the variance of the dataset regardless of the dependent variable.  This makes PCA an unsupervised model (we do not consider the dependent variable).
+2. Linear Discriminant Analysis (LDA)
+     - From the n independent variables of your dataset, LDA extracts p <= n new independent variables that separate the most classes of the dependent variable.  LDA is a supervised dimensionality reduction model.
+3. Kernel PCA
+     - PCA and LDA feature extraction techniques work on linear data - when the data is linearly separable.  Kernal PCA is adapted to non-linear data.
+4. Quadratic Discriminant Analysis (QDA)
+     - TO DO
+
+## Principal Component Analysis
+
+```{r child = 'DimensionalityReduction_PCA.Rmd'}
+```
+
+## Linear Discriminant Analysis
+
+```{r child = 'DimensionalityReduction_LDA.Rmd'}
+```
+
+## Kernal PCA
+
+```{r child = 'DimensionalityReduction_KernalPCA.Rmd'}
+```
+
+# Model Selection & Boosting
+
+```{r child = 'modelSelection_kFold.Rmd'}
+```
+
+```{r child = 'modelSelection_Grid.Rmd'}
+```
+
+# XGBoost
+
+```{r child = 'xgboost.Rmd'}
+```

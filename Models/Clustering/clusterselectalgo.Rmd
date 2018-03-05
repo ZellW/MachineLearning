@@ -1,0 +1,47 @@
+---
+title: "Selecting the Best Clustering Algorithm"
+output: html_document
+---
+
+### Introduction
+
+We will use the *clValid* package which can be used to simultaneously compare multiple clustering algorithms in a single function call to find the best algo and the optimal number of clusters.
+
+The clValid package leverages two cluster validation methods:
+
+1. Internal Measures: This includes connectivity, the silhouette coefficient and the Dunn Index.
+2. Stability Measures:  This is a special version on internal measures evaluating the consistency of a clustering result by comparing it with the clusters obtained after each column is removed one at a time.  This includes detail which I will not detail:
+
+     - APN - Average Proportion of Non-Overlap
+     - AD - Average Distance
+     - ADM - Average Distance Between Means
+     - FOM - Figure of Merit
+     
+### clValid Selection Example
+
+```{r getPackage, echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("clValid",  prompt = FALSE)
+```
+
+```{r try_clValid, message=FALSE, warning=FALSE}
+df <- scale(iris[, -5])
+
+#Compute clValid
+clmethods <- c("hierarchical", "kmeans", "pam")
+internal <- clValid(df, nClust=2:6, clMethods=clmethods, validation="internal")
+summary(internal)
+```
+
+The summary above suggests that hierarchical clustering with 2 clusters performs the best in each case.  Regardless of the clustering algorithm, the optimal number of clusters appears to be 2 using these 3 measures.  (Of course we know that there are really 3 clusters).
+
+Stability measure can be used like this:
+
+```{r}
+#clmethods <- c("hierarchical", "kmeans", "pam")
+stab <- clValid(df, nClust=2:6, clmethods=clmethods, validation="stability")
+optimalScores(stab)
+```
+
+The results above seem to confuse the number of clusters even more.  APN and ADM suggest 2 clusters and the others 6.  Hmm, not sure what to make of this package!

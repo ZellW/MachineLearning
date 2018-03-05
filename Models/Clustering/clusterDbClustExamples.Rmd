@@ -1,0 +1,88 @@
+---
+title: "NbClust - Determine Optimal Number of Clusters"
+output: html_document
+---
+
+Clustering is the partitioning of a set of objects into groups (clusters) so that objects within a group are more similar to each others than objects in different groups. Most of the clustering algorithms depend on some assumptions in order to define the subgroups present in a data set. As a consequence, the resulting clustering scheme requires some sort of evaluation as regards its validity.
+
+The evaluation procedure has to tackle difficult problems such as the quality of clusters, the degree with which a clustering scheme fits a specific data set and the optimal number of clusters in a partitioning. In the literature, a wide variety of indices have been proposed to find the optimal number of clusters in a partitioning of a data set during the clustering process. However, for most of indices proposed in the literature, programs are unavailable to test these indices and compare them.
+
+The [R package **NbClust**](https://cran.r-project.org/web/packages/NbClust/NbClust.pdf) has been developed for that purpose. It provides 30 indices which determine the number of clusters in a data set and it offers also the best clustering scheme from different results to the user. In addition, it provides a function to perform k-means and hierarchical clustering with different distance measures and aggregation methods. Any combination of validation indices and clustering methods can be requested in a single function call. This enables the user to simultaneously evaluate several clustering schemes while varying the number of clusters, to help determining the most appropriate number of clusters for the data set of interest. 
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("NbClust",  prompt = FALSE)
+```
+
+### Examples
+
+#### Simulated Data Example
+```{r}
+data <- read.table("../data/SimulatedData.txt", header = TRUE, quote = "\"")
+plot(data)
+
+res <- NbClust(data, distance = "euclidean", min.nc = 2, max.nc = 8, method = "ward.D2",
+               index = "duda")
+res$All.index
+res$Best.nc
+res$All.CriticalValues
+res$Best.partition
+
+res <- NbClust(data, distance = "euclidean", min.nc = 2, max.nc = 8, method = "complete",
+               index = "alllong")
+res$All.index
+res$Best.nc
+res$All.CriticalValues
+res$Best.partition
+```
+
+#### Simulated Data Example 2
+```{r}
+set.seed(1)
+y <- rbind(matrix(rnorm(150,sd = 0.3),ncol = 3),
+           matrix(rnorm(150,mean = 3,sd = 0.2),ncol = 3),
+           matrix(rnorm(150,mean = 5,sd = 0.3),ncol = 3))
+diss_matrix <-  dist(y, method = "euclidean", diag = FALSE)
+res <- NbClust(y, diss = diss_matrix, distance = NULL, min.nc = 2, max.nc = 6, 
+               method = "average", index = "ch")  
+
+res$All.index
+res$Best.nc
+res$Best.partition
+```
+
+#### Simulated Data Example 3
+```{r}
+set.seed(1)
+x <- rbind(matrix(rnorm(20, sd = 0.1), ncol = 2),
+           matrix(rnorm(20, mean = 1, sd = 0.2), ncol = 2),
+           matrix(rnorm(20, mean = 5, sd = 0.1), ncol = 2),
+           matrix(rnorm(20, mean = 7, sd = 0.2), ncol = 2))
+diss_matrix <-  dist(x, method = "euclidean", diag = FALSE)
+res <- NbClust(x, diss = diss_matrix, distance = NULL, min.nc = 2, max.nc = 6, 
+        method = "complete", index = "alllong")  
+
+res$All.index
+res$Best.nc
+res$All.CriticalValues
+res$Best.partition
+```
+
+#### Iris Data Set
+```{r}
+# 4.2 Real data set
+
+pairs(iris[, 1:4], bg = c("yellow", "green", "black")[iris$Species], pch = 21)
+
+data <- iris[, -5]
+diss_matrix <-  dist(data, method = "euclidean", diag = FALSE)
+res <- NbClust(data, diss = diss_matrix, distance = NULL, min.nc = 2, max.nc = 10,
+               method = "complete", index = "alllong")
+res$All.index
+res$Best.nc
+res$All.CriticalValues
+res$Best.partition
+```
+
+[Free Cluster PDF](http://www-users.cs.umn.edu/~kumar/dmbook/ch8.pdf)

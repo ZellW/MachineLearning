@@ -1,0 +1,70 @@
+---
+title: "ML2_Forecasting"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("forecast", "quantmod", "dplyr", "ggplot2", prompt = FALSE)
+```
+
+## Regression Introduction
+
+Time series data is an important area of analysis, especially if you do a lot of web analytics. To be able to analyse time series effectively, it helps to understand the interaction between general seasonality in activity and the underlying trend.
+
+The interactions between trend and seasonality are typically classified as either additive or multiplicative. This post looks at how we can classify a given time series as one or the other to facilitate further processing.
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_Forecasting1.JPG")
+
+knitr::include_graphics("./images/ML2_Forecasting2.JPG")
+```
+
+### Additive or multiplicative?
+
+It’s important to understand what the difference between a multiplicative time series and an additive one.
+
+There are three components to a time series:
+
+– trend how things are overall changing
+– seasonality how things change within a given period e.g. a year, month, week, day
+– error/residual/irregular activity not explained by the trend or the seasonal value
+
+How these three components interact determines the difference between a multiplicative and an additive time series.
+
+In a multiplicative time series, the components multiply together to make the time series. If you have an increasing trend, the amplitude of seasonal activity increases. Everything becomes more exaggerated. This is common when you’re looking at web traffic.
+
+In an additive time series, the components add together to make the time series. If you have an increasing trend, you still see roughly the same size peaks and troughs throughout the time series. This is often seen in indexed time series where the absolute value is growing but changes stay relative.
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_Forecasting3.JPG")
+
+knitr::include_graphics("./images/ML2_Forecasting4.JPG")
+```
+
+## Forecasting R Code
+
+```{r}
+sales <- scan("http://robjhyndman.com/tsdldata/data/sales.dat")
+sales
+# store in timeseries Object
+salestimeseries<-ts(sales, frequency=12, start=c(1987,1))# sales data by month, first date is Jan 1987
+salestimeseries
+
+# Check whether it is an additive/ multiplicative series
+plot.ts(salestimeseries)#The fluctuations change as the label changes - suggest multiplicative
+
+# Log transformation to additive timeseries
+logsalestimeseries <- log(salestimeseries)
+plot.ts(logsalestimeseries)
+
+#Decompose a timeseries into parts
+plot(decompose(logsalestimeseries))
+
+# plot a timeseries forecasting graph
+ets1 <- ets(logsalestimeseries, model="MMM")#exponential smoothing function
+fcast <- forecast(ets1)
+plot(fcast, lwd=3, col="red", type="o")
+```
+

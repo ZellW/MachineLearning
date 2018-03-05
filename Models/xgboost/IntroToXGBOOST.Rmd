@@ -1,0 +1,546 @@
+---
+title: "Learning XGBOOST"
+output: html_document
+---
+
+https://github.com/dmlc/xgboost/blob/master/R-package/vignettes/discoverYourData.Rmd
+
+
+Introduction
+============
+
+**XGBoost** is an implementation of the famous gradient boosting algorithm. This model is often described as a *blackbox*, meaning it works well but it is not trivial to understand how. Indeed, the model is made of hundreds (thousands?) of decision trees. You may wonder how possible a human would be able to have a general view of the model?
+
+While XGBoost is known for its fast speed and accurate predictive power, it also comes with various functions to help you understand the model.
+The purpose of this RMarkdown document is to demonstrate how easily we can leverage the functions already implemented in **XGBoost R** package. Of course, everything showed below can be applied to the dataset you may have to manipulate at work or wherever!
+
+First we will prepare the **Otto** dataset and train a model, then we will generate two visualisations to get a clue of what is important to the model, finally, we will see how we can leverage these information.
+
+Preparation of the data
+=======================
+
+This part is based on the **R** tutorial example by [Tong He](https://github.com/dmlc/xgboost/blob/master/demo/kaggle-otto/otto_train_pred.R)
+
+First, let's load the packages and the dataset.
+
+```{r loading}
+require(xgboost)
+require(methods)
+require(data.table)
+require(magrittr)
+train <- fread('data/train.csv', header = T, stringsAsFactors = F)
+test <- fread('data/test.csv', header=TRUE, stringsAsFactors = F)
+```
+> `magrittr` and `data.table` are here to make the code cleaner and much more rapid.
+
+Let's explore the dataset.
+
+```{r explore}
+# Train dataset dimensions
+dim(train)
+
+# Training content
+train[1:6,1:5, with =F]
+
+# Test dataset dimensions
+dim(test)
+
+# Test content
+test[1:6,1:5, with =F]
+```
+> We only display the 6 first rows and 5 first columns for convenience
+
+Each *column* represents a feature measured by an `integer`. Each *row* is an **Otto** product.
+
+Obviously the first column (`ID`) doesn't contain any useful information.
+
+To let the algorithm focus on real stuff, we will delete it.
+
+```{r clean, results='hide'}
+# Delete ID column in training dataset
+train[, id := NULL]
+
+# Delete ID column in testing dataset
+test[, id := NULL]
+```
+
+According to its description, the **Otto** challenge is a multi class classification challenge. We need to extract the labels (here the name of the different classes) from the dataset. We only have two files (test and training), it seems logical that the training file contains the class we are looking for. Usually the labels is in the first or the last column. We already know what is in the first column, let's check the content of the last one.
+
+```{r searchLabel}
+# Check the content of the last column
+train[1:6, ncol(train), with  = F]
+# Save the name of the last column
+nameLastCol <- names(train)[ncol(train)]
+```
+
+The classes are provided as character string in the `r ncol(train)`th column called `r nameLastCol`. As you may know, **XGBoost** doesn't support anything else than numbers. So we will convert classes to `integer`. Moreover, according to the documentation, it should start at `0`.
+
+For that purpose, we will:
+
+* extract the target column
+* remove `Class_` from each class name
+* convert to `integer`
+* remove `1` to the new value
+
+```{r classToIntegers}
+# Convert from classes to numbers
+y <- train[, nameLastCol, with = F][[1]] %>% gsub('Class_','',.) %>% {as.integer(.) -1}
+
+# Display the first 5 levels
+y[1:5]
+```
+
+We remove label column from training dataset, otherwise **XGBoost** would use it to guess the labels!
+
+```{r deleteCols, results='hide'}
+train[, nameLastCol:=NULL, with = F]
+```
+
+`data.table` is an awesome implementation of data.frame, unfortunately it is not a format supported natively by **XGBoost**. We need to convert both datasets (training and test) in `numeric` Matrix format.
+
+```{r convertToNumericMatrix}
+trainMatrix <- train[,lapply(.SD,as.numeric)] %>% as.matrix
+testMatrix <- test[,lapply(.SD,as.numeric)] %>% as.matrix
+```
+
+Model training
+==============
+
+Before the learning we will use the cross validation to evaluate the our error rate.
+
+Basically **XGBoost** will divide the training data in `nfold` parts, then **XGBoost** will retain the first part to use it as the test data and perform a training. Then it will reintegrate the first part and retain the second part, do a training and so on...
+
+You can look at the function documentation for more information.
+
+```{r crossValidation}
+numberOfClasses <- max(y) + 1
+
+param <- list("objective" = "multi:softprob",
+              "eval_metric" = "mlogloss",
+              "num_class" = numberOfClasses)
+
+cv.nround <- 5
+cv.nfold <- 3
+
+bst.cv = xgb.cv(param=param, data = trainMatrix, label = y,
+                nfold = cv.nfold, nrounds = cv.nround)
+```
+> As we can see the error rate is low on the test dataset (for a 5mn trained model).
+
+Finally, we are ready to train the real model!!!
+
+```{r modelTraining}
+nround = 50
+bst = xgboost(param=param, data = trainMatrix, label = y, nrounds=nround)
+```
+
+Model understanding
+===================
+
+Feature importance
+------------------
+
+So far, we have built a model made of **`r nround`** trees.
+
+To build a tree, the dataset is divided recursively several times. At the end of the process, you get groups of observations (here, these observations are properties regarding **Otto** products).
+
+Each division operation is called a *split*.
+
+Each group at each division level is called a branch and the deepest level is called a *leaf*.
+
+In the final model, these *leafs* are supposed to be as pure as possible for each tree, meaning in our case that each *leaf* should be made of one class of **Otto** product only (of course it is not true, but that's what we try to achieve in a minimum of splits).
+
+**Not all *splits* are equally important**. Basically the first *split* of a tree will have more impact on the purity that, for instance, the deepest *split*. Intuitively, we understand that the first *split* makes most of the work, and the following *splits* focus on smaller parts of the dataset which have been misclassified by the first *tree*.
+
+In the same way, in Boosting we try to optimize the misclassification at each round (it is called the *loss*). So the first *tree* will do the big work and the following trees will focus on the remaining, on the parts not correctly learned by the previous *trees*.
+
+The improvement brought by each *split* can be measured, it is the *gain*.
+
+Each *split* is done on one feature only at one value.
+
+Let's see what the model looks like.
+
+```{r modelDump}
+model <- xgb.dump(bst, with.stats = T)
+model[1:10]
+```
+> For convenience, we are displaying the first 10 lines of the model only.
+
+Clearly, it is not easy to understand what it means.
+
+Basically each line represents a *branch*, there is the *tree* ID, the feature ID, the point where it *splits*, and information regarding the next *branches* (left, right, when the row for this feature is N/A).
+
+Hopefully, **XGBoost** offers a better representation: **feature importance**.
+
+Feature importance is about averaging the *gain* of each feature for all *split* and all *trees*.
+
+Then we can use the function `xgb.plot.importance`.
+
+```{r importanceFeature, fig.align='center', fig.height=5, fig.width=10}
+# Get the feature real names
+names <- dimnames(trainMatrix)[[2]]
+
+# Compute feature importance matrix
+importance_matrix <- xgb.importance(names, model = bst)
+
+# Nice graph
+xgb.plot.importance(importance_matrix[1:10,])
+```
+
+> To make it understandable we first extract the column names from the `Matrix`.
+
+Interpretation
+--------------
+
+In the feature importance above, we can see the first 10 most important features.
+
+This function gives a color to each bar. These colors represent groups of features. Basically a K-means clustering is  applied to group each feature by importance.
+
+From here you can take several actions. For instance you can remove the less important feature (feature selection process), or go deeper in the interaction between the most important features and labels.
+
+Or you can just reason about why these features are so important (in **Otto** challenge we can't go this way because there is not enough information).
+
+Tree graph
+----------
+
+Feature importance gives you feature weight information but not interaction between features.
+
+**XGBoost R** package have another useful function for that.
+
+Please, scroll on the right to see the tree.
+
+```{r treeGraph, dpi=1500, fig.align='left'}
+xgb.plot.tree(feature_names = names, model = bst, n_first_tree = 2)
+```
+
+We are just displaying the first two trees here.
+
+On simple models the first two trees may be enough. Here, it might not be the case. We can see from the size of the trees that the interaction between features is complicated.
+Besides, **XGBoost** generate `k` trees at each round for a `k`-classification problem. Therefore the two trees illustrated here are trying to classify data into different classes.
+
+Understand your dataset with XGBoost
+====================================
+
+Introduction
+------------
+
+The purpose of this vignette is to show you how to use **Xgboost** to discover and understand your own dataset better.
+
+This vignette is not about predicting anything (see [Xgboost presentation](https://github.com/dmlc/xgboost/blob/master/R-package/vignettes/xgboostPresentation.Rmd)). We will explain how to use **Xgboost** to highlight the *link* between the *features* of your data and the *outcome*.
+
+Package loading:
+
+```{r libLoading, results='hold', message=F, warning=F}
+require(xgboost)
+require(Matrix)
+require(data.table)
+if (!require('vcd')) install.packages('vcd')
+```
+
+> **VCD** package is used for one of its embedded dataset only.
+
+Preparation of the dataset
+--------------------------
+
+### Numeric v.s. categorical variables
+
+
+**Xgboost** manages only `numeric` vectors.
+
+What to do when you have *categorical* data?
+
+A *categorical* variable has a fixed number of different values. For instance, if a variable called *Colour* can have only one of these three values, *red*, *blue* or *green*, then *Colour* is a *categorical* variable.
+
+> In **R**, a *categorical* variable is called `factor`.
+>
+> Type `?factor` in the console for more information.
+
+To answer the question above we will convert *categorical* variables to `numeric` one.
+
+### Conversion from categorical to numeric variables
+
+#### Looking at the raw data
+
+In this Vignette we will see how to transform a *dense* `data.frame` (*dense* = few zeroes in the matrix) with *categorical* variables to a very *sparse* matrix (*sparse* = lots of zero in the matrix) of `numeric` features.
+
+The method we are going to see is usually called [one-hot encoding](http://en.wikipedia.org/wiki/One-hot).
+
+The first step is to load `Arthritis` dataset in memory and wrap it with `data.table` package.
+
+```{r, results='hide'}
+data(Arthritis)
+df <- data.table(Arthritis, keep.rownames = F)
+```
+
+> `data.table` is 100% compliant with **R** `data.frame` but its syntax is more consistent and its performance for large dataset is [best in class](http://stackoverflow.com/questions/21435339/data-table-vs-dplyr-can-one-do-something-well-the-other-cant-or-does-poorly) (`dplyr` from **R** and `Pandas` from **Python** [included](https://github.com/Rdatatable/data.table/wiki/Benchmarks-%3A-Grouping)). Some parts of **Xgboost** **R** package use `data.table`.
+
+The first thing we want to do is to have a look to the first few lines of the `data.table`:
+
+```{r}
+head(df)
+```
+
+Now we will check the format of each column.
+
+```{r}
+str(df)
+```
+
+2 columns have `factor` type, one has `ordinal` type.
+
+> `ordinal` variable :
+>
+> * can take a limited number of values (like `factor`) ;
+> * these values are ordered (unlike `factor`). Here these ordered values are: `Marked > Some > None`
+
+#### Creation of new features based on old ones
+
+We will add some new *categorical* features to see if it helps.
+
+##### Grouping per 10 years
+
+For the first feature we create groups of age by rounding the real age.
+
+Note that we transform it to `factor` so the algorithm treat these age groups as independent values.
+
+Therefore, 20 is not closer to 30 than 60. To make it short, the distance between ages is lost in this transformation.
+
+```{r}
+head(df[,AgeDiscret := as.factor(round(Age/10,0))])
+```
+
+##### Random split into two groups
+
+Following is an even stronger simplification of the real age with an arbitrary split at 30 years old. We choose this value **based on nothing**. We will see later if simplifying the information based on arbitrary values is a good strategy (you may already have an idea of how well it will work...).
+
+```{r}
+head(df[,AgeCat:= as.factor(ifelse(Age > 30, "Old", "Young"))])
+```
+
+##### Risks in adding correlated features
+
+These new features are highly correlated to the `Age` feature because they are simple transformations of this feature.
+
+For many machine learning algorithms, using correlated features is not a good idea. It may sometimes make prediction less accurate, and most of the time make interpretation of the model almost impossible. GLM, for instance, assumes that the features are uncorrelated.
+
+Fortunately, decision tree algorithms (including boosted trees) are very robust to these features. Therefore we have nothing to do to manage this situation.
+
+##### Cleaning data
+
+We remove ID as there is nothing to learn from this feature (it would just add some noise).
+
+```{r, results='hide'}
+df[,ID:=NULL]
+```
+
+We will list the different values for the column `Treatment`:
+
+```{r}
+levels(df[,Treatment])
+```
+
+
+#### Encoding categorical features
+
+Next step, we will transform the categorical data to dummy variables.
+Several encoding methods exist, e.g., [one-hot encoding](http://en.wikipedia.org/wiki/One-hot) is a common approach.
+We will use the [dummy contrast coding](http://www.ats.ucla.edu/stat/r/library/contrast_coding.htm#dummy) which is popular because it producess "full rank" encoding (also see [this blog post by Max Kuhn](http://appliedpredictivemodeling.com/blog/2013/10/23/the-basics-of-encoding-categorical-data-for-predictive-models)).
+
+The purpose is to transform each value of each *categorical* feature into a *binary* feature `{0, 1}`.
+
+For example, the column `Treatment` will be replaced by two columns, `TreatmentPlacebo`, and `TreatmentTreated`. Each of them will be *binary*. Therefore, an observation which has the value `Placebo` in column `Treatment` before the transformation will have after the transformation the value `1` in the new column `TreatmentPlacebo` and the value `0` in the new column `TreatmentTreated`. The column `TreatmentPlacebo` will disappear during the contrast encoding, as it would be absorbed into a common constant intercept column.
+
+Column `Improved` is excluded because it will be our `label` column, the one we want to predict.
+
+```{r, warning=FALSE,message=FALSE}
+sparse_matrix <- sparse.model.matrix(Improved ~ ., data = df)[,-1]
+head(sparse_matrix)
+```
+
+> Formula `Improved ~ .` used above means transform all *categorical* features but column `Improved` to binary values. The `-1` column selection removes the intercept column which is full of `1` (this column is generated by the conversion). For more information, you can type `?sparse.model.matrix` in the console.
+
+Create the output `numeric` vector (not as a sparse `Matrix`):
+
+```{r}
+output_vector = df[,Improved] == "Marked"
+```
+
+1. set `Y` vector to `0`;
+2. set `Y` to `1` for rows where `Improved == Marked` is `TRUE` ;
+3. return `Y` vector.
+
+Build the model
+---------------
+
+The code below is very usual. For more information, you can look at the documentation of `xgboost` function (or at the vignette [Xgboost presentation](https://github.com/dmlc/xgboost/blob/master/R-package/vignettes/xgboostPresentation.Rmd)).
+
+```{r}
+bst <- xgboost(data = sparse_matrix, label = output_vector, max_depth = 4,
+               eta = 1, nthread = 2, nrounds = 10,objective = "binary:logistic")
+
+```
+
+You can see some `train-error: 0.XXXXX` lines followed by a number. It decreases. Each line shows how well the model explains your data. Lower is better.
+
+A model which fits too well may [overfit](http://en.wikipedia.org/wiki/Overfitting) (meaning it copy/paste too much the past, and won't be that good to predict the future).
+
+> Here you can see the numbers decrease until line 7 and then increase.
+>
+> It probably means we are overfitting. To fix that I should reduce the number of rounds to `nrounds = 4`. I will let things like that because I don't really care for the purpose of this example :-)
+
+Feature importance
+------------------
+
+## Measure feature importance
+
+
+### Build the feature importance data.table
+
+Remember, each binary column corresponds to a single value of one of *categorical* features.
+
+```{r}
+importance <- xgb.importance(feature_names = colnames(sparse_matrix), model = bst)
+head(importance)
+```
+
+> The column `Gain` provide the information we are looking for.
+>
+> As you can see, features are classified by `Gain`.
+
+`Gain` is the improvement in accuracy brought by a feature to the branches it is on. The idea is that before adding a new split on a feature X to the branch there was some wrongly classified elements, after adding the split on this feature, there are two new branches, and each of these branch is more accurate (one branch saying if your observation is on this branch then it should be classified as `1`, and the other branch saying the exact opposite).
+
+`Cover` measures the relative quantity of observations concerned by a feature.
+
+`Frequency` is a simpler way to measure the `Gain`. It just counts the number of times a feature is used in all generated trees. You should not use it (unless you know why you want to use it).
+
+#### Improvement in the interpretability of feature importance data.table
+
+We can go deeper in the analysis of the model. In the `data.table` above, we have discovered which features counts to predict if the illness will go or not. But we don't yet know the role of these features. For instance, one of the question we may want to answer would be: does receiving a placebo treatment helps to recover from the illness?
+
+One simple solution is to count the co-occurrences of a feature and a class of the classification.
+
+For that purpose we will execute the same function as above but using two more parameters, `data` and `label`.
+
+```{r}
+importanceRaw <- xgb.importance(feature_names = colnames(sparse_matrix), model = bst, data = sparse_matrix, label = output_vector)
+
+# Cleaning for better display
+importanceClean <- importanceRaw[,`:=`(Cover=NULL, Frequency=NULL)]
+
+head(importanceClean)
+```
+
+> In the table above we have removed two not needed columns and select only the first lines.
+
+First thing you notice is the new column `Split`. It is the split applied to the feature on a branch of one of the tree. Each split is present, therefore a feature can appear several times in this table. Here we can see the feature `Age` is used several times with different splits.
+
+How the split is applied to count the co-occurrences? It is always `<`. For instance, in the second line, we measure the number of persons under 61.5 years with the illness gone after the treatment.
+
+The two other new columns are `RealCover` and `RealCover %`. In the first column it measures the number of observations in the dataset where the split is respected and the label marked as `1`. The second column is the percentage of the whole population that `RealCover` represents.
+
+Therefore, according to our findings, getting a placebo doesn't seem to help but being younger than 61 years may help (seems logic).
+
+> You may wonder how to interpret the `< 1.00001` on the first line. Basically, in a sparse `Matrix`, there is no `0`, therefore, looking for one hot-encoded categorical observations validating the rule `< 1.00001` is like just looking for `1` for this feature.
+
+### Plotting the feature importance
+
+
+All these things are nice, but it would be even better to plot the results.
+
+```{r, fig.width=8, fig.height=5, fig.align='center'}
+xgb.plot.importance(importance_matrix = importance)
+```
+
+Feature have automatically been divided in 2 clusters: the interesting features... and the others.
+
+> Depending of the dataset and the learning parameters you may have more than two clusters. Default value is to limit them to `10`, but you can increase this limit. Look at the function documentation for more information.
+
+According to the plot above, the most important features in this dataset to predict if the treatment will work are :
+
+* the Age ;
+* having received a placebo or not ;
+* the sex is third but already included in the not interesting features group ;
+* then we see our generated features (AgeDiscret). We can see that their contribution is very low.
+
+### Do these results make sense?
+
+
+Let's check some **Chi2** between each of these features and the label.
+
+Higher **Chi2** means better correlation.
+
+```{r, warning=FALSE, message=FALSE}
+c2 <- chisq.test(df$Age, output_vector)
+print(c2)
+```
+
+Pearson correlation between Age and illness disapearing is **`r round(c2$statistic, 2 )`**.
+
+```{r, warning=FALSE, message=FALSE}
+c2 <- chisq.test(df$AgeDiscret, output_vector)
+print(c2)
+```
+
+Our first simplification of Age gives a Pearson correlation is **`r round(c2$statistic, 2)`**.
+
+```{r, warning=FALSE, message=FALSE}
+c2 <- chisq.test(df$AgeCat, output_vector)
+print(c2)
+```
+
+The perfectly random split I did between young and old at 30 years old have a low correlation of **`r round(c2$statistic, 2)`**. It's a result we may expect as may be in my mind > 30 years is being old (I am 32 and starting feeling old, this may explain that), but for the illness we are studying, the age to be vulnerable is not the same.
+
+Morality: don't let your *gut* lower the quality of your model.
+
+In *data science* expression, there is the word *science* :-)
+
+Conclusion
+----------
+
+As you can see, in general *destroying information by simplifying it won't improve your model*. **Chi2** just demonstrates that.
+
+But in more complex cases, creating a new feature based on existing one which makes link with the outcome more obvious may help the algorithm and improve the model.
+
+The case studied here is not enough complex to show that. Check [Kaggle website](http://www.kaggle.com/) for some challenging datasets. However it's almost always worse when you add some arbitrary rules.
+
+Moreover, you can notice that even if we have added some not useful new features highly correlated with other features, the boosting tree algorithm have been able to choose the best one, which in this case is the Age.
+
+Linear model may not be that smart in this scenario.
+
+Special Note: What about Random Forests™?
+-----------------------------------------
+
+As you may know, [Random Forests™](http://en.wikipedia.org/wiki/Random_forest) algorithm is cousin with boosting and both are part of the [ensemble learning](http://en.wikipedia.org/wiki/Ensemble_learning) family.
+
+Both trains several decision trees for one dataset. The *main* difference is that in Random Forests™, trees are independent and in boosting, the tree `N+1` focus its learning on the loss (<=> what has not been well modeled by the tree `N`).
+
+This difference have an impact on a corner case in feature importance analysis: the *correlated features*.
+
+Imagine two features perfectly correlated, feature `A` and feature `B`. For one specific tree, if the algorithm needs one of them, it will choose randomly (true in both boosting and Random Forests™).
+
+However, in Random Forests™ this random choice will be done for each tree, because each tree is independent from the others. Therefore, approximatively, depending of your parameters, 50% of the trees will choose feature `A` and the other 50% will choose feature `B`. So the *importance* of the information contained in `A` and `B` (which is the same, because they are perfectly correlated) is diluted in `A` and `B`. So you won't easily know this information is important to predict what you want to predict! It is even worse when you have 10 correlated features...
+
+In boosting, when a specific link between feature and outcome have been learned by the algorithm, it will try to not refocus on it (in theory it is what happens, reality is not always that simple). Therefore, all the importance will be on feature `A` or on feature `B` (but not both). You will know that one feature have an important role in the link between the observations and the label. It is still up to you to search for the correlated features to the one detected as important if you need to know all of them.
+
+If you want to try Random Forests™ algorithm, you can tweak Xgboost parameters!
+
+For instance, to compute a model with 1000 trees, with a 0.5 factor on sampling rows and columns:
+
+```{r, warning=FALSE, message=FALSE}
+data(agaricus.train, package='xgboost')
+data(agaricus.test, package='xgboost')
+train <- agaricus.train
+test <- agaricus.test
+
+#Random Forest™ - 1000 trees
+bst <- xgboost(data = train$data, label = train$label, max_depth = 4, num_parallel_tree = 1000, subsample = 0.5, colsample_bytree =0.5, nrounds = 1, objective = "binary:logistic")
+
+#Boosting - 3 rounds
+bst <- xgboost(data = train$data, label = train$label, max_depth = 4, nrounds = 3, objective = "binary:logistic")
+```
+
+> Note that the parameter `round` is set to `1`.
+
+> [**Random Forests™**](https://www.stat.berkeley.edu/~breiman/RandomForests/cc_papers.htm) is a trademark of Leo Breiman and Adele Cutler and is licensed exclusively to Salford Systems for the commercial release of the software.
+
+**Reference**:  https://github.com/dmlc/xgboost/blob/master/demo/kaggle-otto/understandingXGBoostModel.Rmd

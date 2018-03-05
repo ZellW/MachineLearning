@@ -1,0 +1,363 @@
+---
+title: "EDA_Modeling"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("dplyr", "randomForest", "caret", "pROC", "RCurl", "readr", "factoextra", prompt = FALSE)
+```
+
+## Introduction
+
+We are going to look at a handful of typical models - the common supervised models: Random Forest, GBM, GLMNET and an unsupervised one: K-means clustering. 
+
+## Random Forest 
+
+Lets start with Random Forest from the [randomForest](http://www.insider.org/packages/cran/randomforest/docs/randomforest) package. For the subsequent models, we will use caret, but right now we’ll go directly with RF . Going to need three of our pipeline functions: Binarize_Features, Impute_Features, Get_Free_Text_Measures.
+
+Load the Titanic data set again. Take a quick peek at it before loading it in memory with readLines:
+```{r message=FALSE, warning=FALSE}
+source("../EDA/EDA_PipelineFunctions.R")
+
+readLines('http://math.ucdenver.edu/RTutorial/titanic.txt', n=5)
+```
+
+With readLines, we  know the file has a header row and 5 columns separated by tabs. 
+```{r}
+titanicDF <- read.csv('http://math.ucdenver.edu/RTutorial/titanic.txt', sep='\t', header = TRUE) 
+head(titanicDF)
+```
+
+We have on free-form text ﬁeld - Name. Transform it using Get_Free_Text_Measures. Binarize
+everything left that is not numeric with Binarize_Features and impute any missing data with Impute_Features. Throw away Name_first_word because it does not bring any value to the model.
+
+```{r}
+titanicDF <- Get_Free_Text_Measures(titanicDF) 
+titanicDF$Name_1st_word <- NULL #1st word - the last name - is not helpful
+titanicDF <- Binarize_Features(titanicDF, leave_out_one_level = TRUE) 
+titanicDF <- Impute_Features(titanicDF, use_mean_instead_of_0 = FALSE)
+```
+
+Split the data set three ways - training, validation and live. The validation set will be used to tune the RF model.  (Recall caret's createDataPartition is good to test and train but so as helpful for 3 splits).  The mentod below is as good as any.
+
+```{r}
+set.seed(1234) 
+random_splits <- runif(nrow(titanicDF)) 
+train_data <- titanicDF[random_splits < .5,] 
+tune_data <- titanicDF[random_splits >= .5 & random_splits < .8,] 
+test_data <- titanicDF[random_splits >= .8,]
+```
+
+`randomForest’s tuneRF` will give the optimal mtry setting to use.  Note we used `tune_data`
+
+```{r}
+set.seed(1234) 
+outcome_name <- 'Survived' 
+feature_names <- setdiff(names(train_data), outcome_name) 
+
+#Starting with the default value of mtry, search for the optimal value (with respect to Out-of-Bag error estimate) of mtry for randomForest.  Want lowest OOB Error and the lowest mTry number - in this case 6
+tnRF <- tuneRF(x=tune_data[,feature_names], y = as.factor(tune_data[, outcome_name]), 
+               mtryStart = 2, stepFactor = 0.5, ntreeTry = 100)
+               #use doBest=TRUE if want to run RF with the found mtryStart value
+               #Varying the mtryStart value varies the output - need to research this.
+tnRF
+```
+
+```{r}
+best_mtry <- tnRF[tnRF[, 2] == min(tnRF[, 2]), 1][[1]]
+best_mtry
+```
+
+We now can call the RF model using the optimal mtry setting. We also set importance to true (http://www.inside-r.org/packages/cran/randomforest/docs/importance (http://www.insider.org/packages/cran/randomforest/docs/importance)) to access variable importance according to RF:
+
+```{r}
+#Random forest uses factors for classification; uses numeric for regressions
+rf_model <- randomForest(x=train_data[, feature_names], y=as.factor(train_data[, outcome_name]), 
+          importance=TRUE, ntree=100, mtry = best_mtry)
+          #importance gives us what the randForest algo found important
+rf_model
+
+print(importance(rf_model, type=1)[importance(rf_model, type=1)!=0,])#everything that was non-zero
+```
+
+The information above tells us a lot:
+
+- If you were in 3rd class, you had a low probability of surviving.  Same true if you were male.
+- in this case, higher numbers are interpretted as less likely to survive.
+- for descion trees, colliniarity is not as imporatn.  If doing linera regression, would want to remove some of the variables.  Ex:  either `Name_2nd_word_Mr` or `Name_2nd_word_Mrs`
+Test the model on our test_data and use the `pROC` library to get an AUC score (which requires probability output):
+
+```{r}
+predictions <- predict(rf_model, newdata=test_data[, feature_names], type="prob") 
+head(predictions)
+
+print(roc(response = test_data[,outcome_name], predictor = predictions[, 2]))
+```
+
+> Recall that ROC is between 0.5 and 1.  1 is perfectly accurate.  0.5 is purely random.
+     
+Rather than return predictions, it is very easy to change to a binary output by removing the `prob` argument:
+
+```{r}
+predictions <- predict(rf_model, newdata=test_data[, feature_names]) 
+head(predictions)
+```
+
+## Modeling with caret Package
+
+Makes it easy to test many different models with very few changes.  The first 25 packages in caret are:
+
+```{r}
+head(names(getModelInfo()), 25)
+```
+
+Will use more data from UCI.  This time diabetes data.
+https:/archive.ics.uci.edu/ml/machine-learning-databases/00296/dataset_diabetes.zip
+
+> UIC changed file types.  Diabetes is now a tar.Z file.  Used 7-Zip to extract and copy files to the EDA data diabetes folder
+
+```{r}
+# UCI Diabetes 130-US hospitals for years 1999-2008 Data Set 
+# https://archive.ics.uci.edu/ml/machine-learning-databases/00296/
+binData <- getBinaryURL("https://archive.ics.uci.edu/ml/machine-learning-databases/00296/dataset_diabetes.zip", 
+                        ssl.verifypeer=FALSE)
+
+#conObj <- file("dataset_diabetes.zip", open = "wb")source("../EDA/EDA_PipelineFunctions.R")
+conObj <- file("../EDA/data/dataset_diabetes.zip", open = "wb")
+writeBin(binData, conObj)
+
+# don't forget to close it
+close(conObj)
+
+# open diabetes file
+files <- unzip("../EDA/data/dataset_diabetes.zip")
+readLines(files[1], n=5)
+```
+
+First line is just headers - there are a lot of them.
+
+Note there are some `?` in the data instead of `NAs`.
+
+```{r}
+diabetes <- data.frame(read_csv(files[1], na = "?"))#another good reason to use readr!
+dim(diabetes)
+```
+
+Clean the data further and drop a few too:
+
+```{r}
+#drop useless variables
+diabetes <- diabetes %>% select(-encounter_id, -patient_nbr, -examide, -citoglipton)
+
+#fix outcome variable
+diabetes$readmitted <- ifelse(diabetes$readmitted =="<30", "yes", "no")
+```
+
+Before creating dummy variables, lets see how many unique feature counts in the character-based features:
+
+```{r}
+charcolumns <- names(diabetes[sapply(diabetes, is.character)])
+non_numeric_data_dim <- c()
+for(colname in charcolumns){
+     non_numeric_data_dim <- rbind(non_numeric_data_dim, c(colname, length(unique(diabetes[, colname]))))
+}
+class(non_numeric_data_dim)
+non_numeric_data_dim <- data.frame(non_numeric_data_dim) %>% 
+     mutate(feature_name = as.character(X1), unique_counts = as.numeric(as.character(X2))) %>% 
+     select(feature_name, unique_counts) %>% arrange(desc(unique_counts))
+
+head(non_numeric_data_dim)
+```
+
+If we bianrise all of these, we end up with over 2256 new features!  Therefore, use `Binarize_Features` function to take the top 20 features from each diag_X and discard the rest.  Repeat with medical_specialty.  (Go to the R Script file that has this function.  The file is named `EDA_PipelineFunctions.R`)
+
+```{r}
+diabetes <- Binarize_Features(data_set = diabetes, leave_out_one_level = TRUE, max_level_count = 20, 
+                    features_to_ignore = "readmitted")
+glimpse(diabetes)
+```
+
+Everything is a number except for the dependent variable - just as we need it!
+
+Now run the `Feature_Engineer_Integers` function and use `nearZeroVar` to remove monotomic features:
+
+```{r}
+diabetes <- Feature_Engineer_Integers(data_set=diabetes, features_to_ignore=c("admission_type_id", "discharge_disposition_id", "admission_source_id"))
+
+nzv = nearZeroVar(diabetes, saveMetrics=TRUE)
+length(rownames(nzv[nzv$nzv==FALSE, ]))
+
+diabetes <- diabetes[,rownames(nzv[nzv$nzv==FALSE, ])]
+dim(diabetes)
+```
+
+### GBM
+
+```{r}
+outcome_name <- "readmitted"
+
+predictor_names <- setdiff(names(diabetes), outcome_name)
+
+splitIndex <- createDataPartition(diabetes[, outcome_name], p = .75, list = FALSE, times = 1)
+train_data <- diabetes[splitIndex, ]
+test_data <- diabetes[-splitIndex, ]
+```
+
+`Caret` offers many tuning functions to get as much as possible out or your models.  The `trainControl` function controls the resampling of data.  This will split the trainnig_data internally and do its own train/rest runs to determine the optimal settings.  In this case, we are oging to cross-validate the data 3 times on different portions of the data before setting the best tuning parameters (for gbm it is `trees`, `shrinkage`, and `interaction depth`).
+
+```{r}
+objControl <- trainControl(method="cv", number = 2, returnResamp = "none", 
+                 summaryFunction = twoClassSummary, classProbs = TRUE)
+```
+
+This is a classification model so we are requesting our mterics use ROC instead of RMSE:
+
+```{r message=FALSE, warning=FALSE}
+gbm_caret_model <- train(train_data[, predictor_names], as.factor(train_data[, outcome_name]),
+                    method="gbm", trControl = objControl, metric = "ROC", preProcess = c("center", "scale"))
+```
+
+```{r}
+summary(gbm_caret_model)
+```
+
+`Caret` also reports what tuning parameters were most important to the model:
+
+```{r}
+gbm_caret_model
+```
+
+Test using test_data.  Two type of evalauation:
+
+- raw - outputs class prediction - yes or no.  Useful in mutinomial models when predicting more thna 2 values.
+- prob - outputs probabilities (needed to control teh threshold and ability to use AUC Curve)
+
+Call the predict functionpassing our trained model and testing data.  We will look at class predictins and use the caret postResample function to get accuracy score.
+
+```{r}
+predictions <- predict(object = gbm_caret_model, test_data[, predictor_names], type = "raw")
+head(predictions)
+postResample(pred = predictions, obs = as.factor(test_data[, outcome_name]))
+```
+
+Wow, 88% accurate .  Good, right.  Not so fast. . . .
+
+```{r}
+prop.table(table(as.factor(diabetes[, outcome_name])))
+```
+
+The model and the historical data are the same!  Model assumed that patients are not readmitted.  Predicting who is not going to be readmitted is easy!  The data is signifiantly skewed.  Therefore, the model is not a good measure how this model works.  AUC handles skewed data well.  Of course for AUC, we require probability output.
+
+```{r}
+predictions <- predict(object = gbm_caret_model, test_data[, predictor_names], type = "prob")
+head(predictions)
+```
+
+To get the AUC score, pass the `yes` column to the `roc` function (each row adds to 1 but we are interested in the `yes`, the **readmitted**.)
+
+```{r}
+auc <- roc(ifelse(test_data[, outcome_name] == "yes", 1, 0), predictions[[2]])
+auc$auc
+```
+
+66% accurate forecasting who will be readmitted - big difference!
+
+## K-Means Clustering
+
+Let’s use our pipeline to prepare a data set for a k-means (https://stat.ethz.ch/R-manual/R-devel/library/stats/html/kmeans.html) unsupervised
+model.  First we need to load into memory the following functions:  Impute_Features and Get_Free_Text_Measures.
+
+Now, load the Auto MPG Data Set (https://archive.ics.uci.edu/ml/datasets/Auto+MPG). This is a simple data set but requires the above function calls as it contains missing data, character-based variables, and numerical data. Let’s load it in memory and run our pipeline functions:
+
+```{r}
+AutoMpg_data <- read.csv("http://mlr.cs.umass.edu/ml/machine-learning-databases/auto-mpg/auto-mpg.data", 
+     na.strings = '?', header=FALSE, sep="", as.is=TRUE, 
+     col.names = c("mpg", "cylinders", "displacement", "horsepower", "weight", "acceleration", "model", 
+                   "origin", "car_name"), 
+     stringsAsFactors = FALSE)
+
+AutoMpg_data <- Get_Free_Text_Measures(data_set = AutoMpg_data, minimum_unique_threshold=0.5)
+AutoMpg_data <- Impute_Features(data_set = AutoMpg_data, use_mean_instead_of_0 = FALSE)
+```
+
+Take a quick look at the data:
+
+```{r}
+str(AutoMpg_data)
+```
+
+Use the k-means model to discover the relationship between acceleration and weight of vehicles using 3 clusters.
+
+```{r}
+km1 = kmeans(x = select(AutoMpg_data, weight, acceleration), centers = 3)
+
+# Plot results
+{plot(select(AutoMpg_data, weight, acceleration), col =km1$cluster, main="K-Means result with 3 clusters", pch=20, cex=2)
+
+# find each cluster's centroids
+points(km1$centers, pch=6, col='blue', cex=6)
+points(km1$centers, pch=6, col='blue', cex=4)
+points(km1$centers, pch=6, col='blue', cex=2)
+points(km1$centers, pch=6, col='yellow', cex=2)}
+```
+
+K-means did split the data into three groups. Unfortunately, the use of k-means here is dimished due to the obvious linear relationship between both variables.
+
+To make this clustering discovery more interesting, we’re going to transform our data set using the car_name_first_word variable which is none other than the brand of each car:
+
+```{r}
+unique(AutoMpg_data$car_name_1st_word)
+```
+
+Group the data by brand into a new data set called brand_set and average all the data by brand. We also use the brand name as a row name (this will become apparent later on):
+
+```{r}
+brand_set <- select(AutoMpg_data, weight, acceleration, car_name_1st_word) %>% group_by(car_name_1st_word) %>% 
+     summarize_each(funs(mean)) %>% data.frame
+
+row.names(brand_set) <- brand_set$car_name_1st_word
+#Note:  factoextra requires rownames for it to plot properly
+brand_set <- dplyr::select(brand_set, -car_name_1st_word)
+
+km1 = kmeans(x = brand_set, centers = 3)
+# Plot results
+plot(brand_set, col =km1$cluster, main="K-Means result with 3 clusters", pch=20, cex=2)
+```
+
+Looking at the grouped data by brand we clearly see three clusters. The first cluter (greens) is clearly away for the other data. Overall, this is
+hard to read beyond seeing some form of clustering.
+
+Use the factoextra (https://cran.r-project.org/web/packages/factoextra/index.html) library. This is why we replaced the row names with the actual brand!
+
+```{r}
+km1 = kmeans(x = brand_set, centers = 3)
+print(km1)
+
+fviz_cluster(km1, data = brand_set)
+```
+
+Wow, right? Clear patterns in the data. We can see that European and Asian vehicles in this data set are lighter than American ones.
+
+Another great tool in factoextra is the ability to advise on how many clusters to use.
+
+```{r}
+fviz_nbclust(brand_set, kmeans, method = "wss")
+```
+
+Seems that fviz_nbclust is recommending 4 clusters using the within cluster sums of squares method. Go ahead, try different sizes and methods.
+
+```{r}
+km1 = kmeans(x = brand_set, centers = 4)
+fviz_cluster(km1, data = brand_set)
+
+km1 = kmeans(x = brand_set, centers = 5)
+fviz_cluster(km1, data = brand_set)
+```
+
+Logically, 3 clusters seems the most rational approach. 
+
+Learn more about factoextra through the following article - Partitioning cluster analysis: Quick start guide - Unsupervised Machine Learning
+(http://www.sthda.com/english/wiki/partitioning-cluster-analysis-quick-start-guide-unsupervised-machine-learning)
+

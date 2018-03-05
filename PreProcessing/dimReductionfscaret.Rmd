@@ -1,0 +1,117 @@
+---
+title: "Dimensional Reduction Using fscaret"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("fscaret", "caret", "pROC", "R.utils", "pls", "C5.0", prompt = FALSE)
+```
+
+## Feature Selection using Ensembles and the `fscaret` package 
+
+The fscaret package, as its name implies, is closely related to the caret package. It relies on caret, and its numerous functions, to get its job done. 
+
+So what does this package do? You give it a data set and a list of models and, in return, fscaret will scale and return the importance of each variable for each model and for the ensemble of models. The tool extracts the importance of each variable by using the selected models' VarImp or similar measuring function. For example, linear models use the absolute value of the t-statistic for each parameter and decision-tree models, total the importance of the individual trees, etc.
+
+The input data needs to be formatted in a particular way: MISO. (Multiple Ins, Single Out). The output
+needs be the last column in the data frame. So you can't have it anywhere else, nor can it predict multiple response columns at once. 
+
+As with anything ensemble related, if you're going to run 50 models in one shot, you better have the computing muscle to do so - there's no free lunch. Start with a single or small set of models. If you're going to run a large ensemble of models, fire it up before going to bed and see what you get the next day. 
+
+For this exercise, we will use a Titanic dataset. The outcome is passenger survivorship (i.e. can you predict who will survive based on various features). We drop the passenger names as they are all unique but keep the passenger titles. We also impute the missing 'Age' variables with the mean:
+
+```{r}
+titanicDF <- read.csv('http://math.ucdenver.edu/RTutorial/titanic.txt',sep='\t')
+titanicDF$Title <- ifelse(grepl('Mr ',titanicDF$Name),'Mr',ifelse(grepl('Mrs ',titanicDF$Name),'Mrs',ifelse(grepl('Miss',titanicDF$Name),'Miss','Nothing')))
+ 
+titanicDF$Age[is.na(titanicDF$Age)] <- median(titanicDF$Age, na.rm=T)
+```
+
+We move the 'Survived' outcome variable to the end of the data frame to be MISO compliant:
+
+```{r}
+# miso format 
+titanicDF <- titanicDF[c('PClass', 'Age',  'Sex',  'Title', 'Survived')]
+```
+
+To help process the data, we use caret's dummyVars function to dummify the Title variable which creates 4 new columns:
+
+```{r}
+titanicDF$Title <- as.factor(titanicDF$Title) 
+titanicDummy <- dummyVars("~.",data=titanicDF, fullRank=F)
+titanicDF <- as.data.frame(predict(titanicDummy,titanicDF)) 
+names(titanicDF)
+
+# to enable probabilities we need to force outcome to factor 
+titanicDF$Survived <- as.factor(ifelse(titanicDF$Survived==1, 'yes', 'no'))
+
+set.seed(1234) 
+splitIndex <- sample(nrow(titanicDF), floor(0.8*nrow(titanicDF))) 
+traindf <- titanicDF[ splitIndex,] 
+testdf  <- titanicDF[-splitIndex,]
+```
+
+Select three models to process our data and call the meat-and-potatoes function of the fscaret package, named as its package, fscaret.  If the above code ran successfully, you will see a series of log outputs (unless you set supress.output to false). Each model will run through its paces and the final fscaret output will list the number of variables each model processed.
+
+```{r message=FALSE, warning=FALSE, results='hide'}
+myFS.class <-fscaret(traindf, testdf, myTimeLimit = 20, preprocessData=TRUE, with.labels=TRUE, 
+           classPred=TRUE, regPred=FALSE, Used.funcClassPred=c("gbm", "rpart", "pls"), supress.output=FALSE, 
+           installReqPckg = TRUE, no.cores=1, saveModel=FALSE)
+```
+
+Also, not all classification models will work for a particular data set. Play around with different models to find a good mix. 
+
+The myFS variable holds a lot of information. The one we're interested in is the $VarImp$matrixVarImp.MeasureError. This returns the top variables, error measurements from the perspective of all models involved, and a scaled scoring to compare models:
+
+```{r}
+results <-  myFS.class$VarImp$matrixVarImp.MeasureError
+```
+
+We need to do a little wrangling in order to clean this up and get a nicely ordered list with the actual variable names attached:
+
+```{r}
+results$Input_no <- as.numeric(results$Input_no) 
+results <- results[,setdiff(names(results), c('SUM%','ImpGrad'))] 
+myFS.class$PPlabels$Input_no <-  as.numeric(rownames(myFS.class$PPlabels)) 
+results <- merge(x=results, y=myFS.class$PPlabels, by="Input_no", all.x=T) 
+results <- results[order(-results$SUM),] 
+print(head(results))
+```
+
+We see that PClass.3rd, Title.Mr, and Sex.female are favorites of all three models in aggregate. 
+
+To extend this further (and learnmore), run the top 5 variables through the Partial Least Squares (PLS) method and predict the score. Instead of using predictions in the form of type='raw' (which returns actual values), use type='prob' (which reruns probabilities between 0 and 1). This will allow us to use the Area Under the Curve (AUC) score from the {pROC} package (install it if needed). 
+
+Run the models with the top 5 voted variables.
+
+```{r}
+traindf_truncated <- traindf[, c(head(as.character(results$Labels),5), 'Survived')] 
+dim(traindf_truncated)
+```
+
+```{r}
+objControl <- trainControl(method='cv', number=3, returnResamp='none', 
+            summaryFunction = twoClassSummary, classProbs = TRUE)
+# pls model 
+set.seed(1234) 
+pls_model <- train(Survived~., data=traindf_truncated, method="pls", metric='roc', trControl=objControl) 
+pls_predictions <- predict(object=pls_model, testdf[,setdiff(names(traindf_truncated), 'Survived')], type='prob') 
+print(auc(predictor=pls_predictions[[2]],response= ifelse(testdf$Survived=='yes',1,0)))
+```
+
+Lets have some fun and show you the basis of creating a loop of models (keep in mind that this requires a lot of experimentation as some models require special parameter settings - keep experimenting). Lets run our top 5 variables through the models C5.0, gbm, and rf.
+
+```{r}
+method_names <- c("C5.0", "gbm", "rf") 
+for (method_name in method_names) {
+     print(method_name)
+     set.seed(1234)
+     model <- train(Survived~., data=traindf_truncated,
+     method=funcClassPred[funcClassPred==method_name], metric='roc', trControl=objControl)
+     predictions <- predict(object=model, testdf[,setdiff(names(traindf_truncated), 'Survived')], type='prob')
+     print(auc(predictor=predictions[[2]],response= ifelse(testdf$Survived=='yes',1,0)))
+}
+```
+

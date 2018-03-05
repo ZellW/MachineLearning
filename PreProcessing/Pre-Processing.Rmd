@@ -1,0 +1,427 @@
+---
+title: "Machine Learning - Data Preprocessing"
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+header-includes: \usepackage{graphicx} \usepackage{mathtools}
+---
+```{r echo=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "dplyr", "Hmisc", "corrplot", "PerformanceAnalytics", "RColorBrewer", "mlbench", "fastICA", prompt = FALSE)
+```
+
+# Pre-Processing Contents
+
+- Creating Dummy Variables
+- Zero- and Near Zero-Variance Predictors
+- Identifying Correlated Predictors
+- Linear Dependencies
+- PreProcessing
+- Transforming Predictors
+
+## Creating Dummy Variables
+
+In R, there are plenty of ways of translating text into numerical data. One of the big advantages of going with the `caret` package is that it is full of features including hundreds of algorithms and pre-processing functions. Once your data fits into `caret's` modular design, it can be run through different models with minimal or no changes.
+
+The function `dummyVars` can be used to generate a complete set of dummy variables from one or more factors. The function takes a formula and a data set and outputs an object that can be used to create the dummy variables using the predict method. 
+
+As the name implies, the `dummyVars` function allows you to create dummy variables.  It translates text data into numerical data for modeling purposes.
+If you are planning on doing predictive analytics or machine learning and want to use regression or any other modeling technique that requires numerical data, you will need to transform your text data into numbers.
+
+And ask the dummyVars function to dummify it. The function takes a standard R formula: something ~ (broken down) by something else or groups of other things. So we simply use ~ . and the dummyVars will transform all characters and factors columns (the function never transforms numeric columns) and return the entire data set:
+
+```{r message=FALSE}
+myDF <- as.data.frame(Titanic)
+glimpse(myDF)
+
+#Using dummyVars: 
+dummies <- dummyVars("~ .", data = myDF)
+myDummies <- predict(dummies, newdata = Titanic)
+head(myDummies)
+ncol(myDummies)
+```
+
+The `fullRank` parameter is worth strong consideration. The rule for creating dummy variables is to have one less variable than the number of categories present to avoid perfect collinearity (dummy variable trap). You want to avoid highly correlated variables. If you have a factor column comprised of two levels ‘male’ and ‘female’ then you don’t need to transform it into two columns. You pick one of the variables and you are either female, if its a 1, or male if its a 0. 
+
+Use `fullRank` below:
+
+```{r}
+dummies <- dummyVars("~ .", data = myDF, fullRank = TRUE)
+myDummies <- predict(dummies, newdata = Titanic)
+head(myDummies)
+ncol(myDummies)
+```
+
+Good work.  We have reduced the number of columns from 11 to 7 and maintained all the information while reducing collinearity.
+
+A few things to remember when creating dummy variables:
+
+- Do not dummy a large data set with many levels like zip codes (yes, people make this mistake regularly). You will greatly increase computing time and your model will not typically be able to extract much information.  (I know, there are exceptions.  All you geneticists out there, please do email me to tell me I am full of crap.  I am thinking in more general terms.)  In the case of zip codes, you would add 43,000+ columns to your data set!
+- DO NOT dummify free-text columns. First look for repeated words or phrases and  take the top 50 (or whatever makes sense for your project) and replace the rest with a generic new column - like *Other*.
+
+##Zero and Near Zero Variance Predictors
+
+Data sets often contain many variables and many of these variables have extremely low variances. This means that there is very little information in these variables because they mostly consist of a single value (e.g. zero).  Removing those variables can significantly improve some models’ performance and/or stability (such as linear regression and logistic regression but tree based model is impervious to this type of predictors).
+
+The concern here that these predictors may become zero-variance predictors when the data are split into cross-validation/bootstrap sub-samples or that a few samples may have an undue influence on the model. These "near-zero-variance" predictors may need to be identified and eliminated prior to modeling. 
+
+`caret` contains a utility function called `nearZeroVar()` for removing such variables to save time during modeling.  This function diagnoses predictors that have one unique value (i.e. are zero variance predictors) or predictors that are have both of the following characteristics: they have very few unique values relative to the number of samples and the ratio of the frequency of the most common value to the frequency of the second most common value is large.
+
+`nearZeroVar()` takes in data, looks at:
+
+- `freqCut`: the cutoff for the ratio of the most common value to the second most common value
+- `uniqueCut`: the cutoff for the percentage of distinct values out of the number of total samples
+
+By default, `caret` uses `freqCut` = 19 and `uniqueCut` = 10, which is conservative. I often am a bit more more aggressive and use `freqCut` = 2 and `uniqueCut` = 20 when calling nearZeroVar().
+
+For example, an example of near zero variance predictor is one that, for 1000 samples, has two distinct values and 999 of them are a single value.
+
+To be flagged, first *the frequency of the most prevalent value* over the second most frequent value (called the `frequency ratio`) must be above `freqCut`. Also, *the percent of unique values*, the number of unique values divided by the total number of samples (times 100), must also be below `uniqueCut`.  In this example, the frequency ratio is 999 and the unique value percentage is 0.0001. 
+
+Create data below to introduce `nearzerovar()`:
+
+```{r}
+#Make up some data
+income <- round(runif(100, min = 35000, max = 350000), 0)
+age <- round(runif(100, min=18, max=72), 0)
+myData <- data.frame(age, income)
+noise <- round(runif(100, min = 1500, max = 15000), 0)
+myData$income <- myData$income + noise
+myData <- arrange(myData, desc(income))
+myData$education <- as.factor(sample(c("High School", "Bachelors", "Masters", "Doctorate"), 100, 
+                                     replace = TRUE, prob =c(0.7, 0.15, 0.12, 0.03) ))
+
+#add two variables with low variance 
+# zero1 only has one unique value - 0
+myData$zero1 <- rep(0, 100)
+# zero2 is a vector with the first element 1 and the rest are 0s
+myData$zero2 <- c(1, rep(0, 99))
+summary(myData)
+```
+
+Now use the `nearzervar` function to identify independent variables that are unbalanced:
+
+```{r}
+nearZeroVar(myData, freqCut = 95/5, uniqueCut = 10)
+```
+
+By default, nearZeroVar will return the column positions that may be  problematic. In our case, obviously, zero1 and zero2 are flagged (columns 4 and 5).  Why?  Let us explore this to make sure it is clear.
+
+Note:  95/5 = 19
+
+**Test Case 1**: If `freqCut` = 19, then to be flagged by `nearzerovar`, the frequency ratio (count of most common / count of the second most common) must be > 19.  To demonstrate this, we change zero2 so it has 10 non-zero values.  This changes the `freqCut` to 90/10 = 9.  9 !> 19 so it is not flagged.  This leaves zero1 as the only flagged value by `nearzerovar`.
+
+```{r}
+myData$zero1 <- rep(0, 100)
+myData$zero2 <- c(rep(1, 10), rep(0, 90))
+nearZeroVar(myData, freqCut = 19, uniqueCut = 10)
+```
+
+**Test Case 2**:  Change the data so the `uniqueCut` = 10 is no longer met.  Recall *percent of unique values*, the number of unique values divided by the total number of samples (x 100) must be below `uniqueCut`.  In the original test, there were only 2 values - {0, 1}.  So `uniqueCut` - (2/100) * 100 = 2.  Since 2 < 10, it gets flagged.  Change the number of unique values so the `uniqueCut` percentage > 10:  
+
+```{r}
+myData$zero1 <- rep(0, 100)
+myData$zero2 <- c(c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11), rep(0, 89))
+nearZeroVar(myData, freqCut = 19, uniqueCut = 10)
+```
+
+Because there are more unique values in zero2, it fails the `uniqueCut` calculation (11/100 = 11% > 10%).  Thus, zero2 is no longer flagged.
+
+##Identifying Correlated Predictors
+
+Multivariate regression methods like Principal Component Regression (PCR) and Partial Least Squares Regression (PLSR) enjoy large popularity in a wide range of ﬁelds, including the natural sciences. The main reason is that they have been designed to confront the situation that there are many, possibly correlated, predictor variables, and relatively few samples.  However, other models may benefit from reducing the level of correlation between the predictors. 
+
+To demostrate correlation, the `mtcars` data will be used.  (Everyone in data science knows this data well!)
+
+```{r}
+data("mtcars")
+myData <- mtcars[, c(1,3,4,5,6,7)]
+head(myData, 6)
+```
+
+Like always (OK, almost always), R has a core function to solve most problems.
+
+Below the correlations coefficients between the possible pairs of variables are shown.
+
+```{r}
+myCor <- round(cor(myData),2)
+myCor
+```
+
+> Note: if your data has missing values, try `cor(myData, use = "complete.obs")`
+
+`cor()` returns only the correlation coefficients between variables. Use `Hmisc` package to calculate the correlation p-values (significance levels).
+
+> Note:  There are different methods to perform correlation analysis.  Pearson correlation measures a linear dependence between two variables (x and y). It can be used only when x and y are from normal distribution. Kendall and Spearman are rank-based correlation coefficients (non-parametric)
+
+## Intermission!
+
+Some quick rules of thumb to decide on Spearman vs. Pearson: 
+
+- The assumptions of Pearsons are constant variance and linearity (or something reasonably close to that), and if these are not met, it might be worth trying Spearmans.
+- If there is >100 data points and the data is linear or close to it, then Pearson will be very similar to Spearman.
+- If you feel that linear regression is a suitable method to analyze your data, then the output of Pearsons will match the sign and magnitude of a linear regression slope.
+- If your data has some non-linear components that linear regression will not pick up, then first try to straighten out the data into a linear form by applying a transform (perhaps log e). If that does not work then Spearman may be appropriate.
+- Always try Pearson's first, and if that does not work, then try Spearman.
+
+OK, back to our regularly scheduled exercise!
+
+The function `rcorr()` can be used to compute the significance levels for Pearson and spear man correlations. It returns both the correlation coefficients and the p-value of the correlation for all possible pairs of columns in the data table.
+
+```{r}
+myCor2 <- rcorr(as.matrix(myData))
+myCor2
+```
+
+The output of the function rcorr() is a list containing the following elements: 
+
+- r : the correlation matrix 
+- n : the matrix of the number of observations used in analyzing each pair of variables 
+- P : the p-values corresponding to the significance levels of correlations
+
+To extract the p-values or the correlation coefficients from the output:
+
+```{r}
+# Extract the correlation coefficients
+myCor2$r
+```
+```{r}
+# Extract p-values
+myCor2$P
+```
+
+There are different ways for visualizing a correlation matrix in R including, but not limited to:
+
+- corrplot() to plot a correlogram
+- scatter plots
+- heatmap
+
+#### Create a correlogram:
+
+The function `corrplot()` takes the correlation matrix as the first argument. The second argument (type=“upper”) is used to display only the upper triangular of the correlation matrix.  (type options are : “upper”, “lower”, “full”)
+
+Positive correlations are displayed in <span style="color:blue">blue</span> and negative correlations in <span style="color=red">red</span> color. Color intensity and the size of the circle are proportional to the correlation coefficients. In the right side of the correlogram, the legend color shows the correlation coefficients and the corresponding colors. 
+
+```{r}
+corrplot(myCor, type = "upper", order = "hclust", tl.col = "black", tl.srt = 45)
+```
+
+It is also possible to combine correlogram with the significance test. Use the result myCor2 with rcorr() function.
+
+Correlations with p-value > 0.01 are considered as insignificant.
+
+```{r}
+# Insignificant correlation are crossed
+corrplot(myCor2$r, type="upper", order="hclust", p.mat = myCor2$P, sig.level = 0.01, insig = "blank")
+```
+
+#### Scatter Plots
+
+`chart.Correlation()` in `PerformanceAnalytics` can be used to display a chart of a correlation matrix.
+
+```{r message=FALSE, warning=FALSE}
+myData <- mtcars[, c(1,3,4,5,6,7)]
+chart.Correlation(myData, histogram=TRUE, pch=19)
+```
+
+- The distribution of each variable is shown on the diagonal.
+- On the bottom of the diagonal : the bivariate scatter plots with a fitted line are displayed
+- On the top of the diagonal : the value of the correlation plus the significance level as stars
+- Each significance level is associated to a symbol : p-values(0, 0.001, 0.01, 0.05, 0.1, 1) <=> symbols(“***”, “**”, “*”, “.”, " “)
+
+#### Heatmap
+
+Using the heatmap function is pretty easy:
+
+- x : the correlation matrix to be plotted
+- col : color palettes
+- symm : logical indicating if x should be treated symmetrically; can only be true when x is a square matrix.
+
+```{r}
+col<- colorRampPalette(brewer.pal(9, "Blues"))(20)
+heatmap(x = myCor, col = col, symm = TRUE)
+```
+
+
+##Linear Dependencies
+
+The `caret` package has a function to find collinear numeric vectors in a data frame. It returns a list with the column numbers that are linear combinations of one another and the columns which can be removed to resolve this.
+
+```{r}
+df = data.frame( A = c( 1, 2, 3), B = c( 2, 4, 6), C = c( 3, 5, 1 ))
+findLinearCombos(df)
+```
+
+If the data frame has multiple instances of linear combinations, use lapply over the list of linear combinations returned from findLinearCombos:
+
+```{r}
+df = data.frame( A = c( 1, 2, 3), B = c( 2, 4, 6), C = c( 3, 5, 1 ), D = c( 6, 10, 2))
+myCollinear = findLinearCombos(df)
+myCollinear
+#Get the column names
+lapply(myCollinear$linearCombos, function(x) colnames(df)[x])
+```
+
+Armed with this information, it is simple to remove the collinear variables.
+
+```{r}
+df = data.frame( A = c( 1, 2, 3), B = c( 2, 4, 6), C = c( 3, 5, 1 ), D = c( 6, 10, 2))
+df
+myCollinear = findLinearCombos(df)
+myCollinear
+df[-myCollinear$remove]
+```
+
+This is so simple to do, do not forget to do it!!
+
+## PreProcessing
+
+The caret package in R provides a number of useful data transforms.
+
+These transforms can be used in two ways.
+
+- Standalone: Transforms can be modeled from training data and applied to multiple data sets. The model of the transform is prepared using the preProcess() function and applied to a data set using the predict() function.
+- Training: Transforms can prepared and applied automatically during model evaluation. Transforms applied during training are prepared using the preProcess() and passed to the train() function via the preProcess argument.
+
+### Scale
+
+The scale transform calculates the standard deviation for an attribute and divides each value by that standard deviation.
+
+```{r}
+data(iris)
+summary(iris[,1:4])
+
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(iris[,1:4], method=c("scale"))
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, iris[,1:4])
+summary(transformed)
+```
+
+### Center
+
+The center transform calculates the mean for an attribute and subtracts it from each value.
+
+```{r}
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(iris[,1:4], method=c("center"))
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, iris[,1:4])
+summary(transformed)
+```
+
+
+
+### Standardize
+
+Combining the scale and center transforms will standardize your data. Attributes will have a mean value of 0 and a standard deviation of 1.
+
+```{r}
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(iris[,1:4], method=c("center", "scale"))
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, iris[,1:4])
+summary(transformed)
+```
+
+### Normalize
+
+Data values can be scaled into the range of [0, 1] which is called normalization.
+
+```{r}
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(iris[,1:4], method=c("range"))
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, iris[,1:4])
+summary(transformed)
+```
+
+### Box-Cox Transform
+
+When an attribute has a Gaussian-like distribution but is shifted, this is called a skew. The distribution of an attribute can be shifted to reduce the skew and make it more Gaussian. The BoxCox transform can perform this operation (assumes all values are positive).
+
+Applied the transform to only two attributes that appear to have a skew.
+
+```{r}
+data(PimaIndiansDiabetes)
+summary(PimaIndiansDiabetes[,7:8])
+
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(PimaIndiansDiabetes[,7:8], method=c("BoxCox"))
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, PimaIndiansDiabetes[,7:8])
+summary(transformed)
+```
+
+### Yeo-Johnson Transform
+
+Another power-transform like the Box-Cox transform but it supports raw values that are equal to zero and negative.
+
+```{r}
+# load libraries
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(PimaIndiansDiabetes[,7:8], method=c("YeoJohnson"))
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, PimaIndiansDiabetes[,7:8])
+summary(transformed)
+```
+
+### Principal Component Analysis
+
+Transform the data to the principal components. The transform keeps components above the variance threshold (default=0.95) or the number of components can be specified (pcaComp). The result is attributes that are uncorrelated, useful for algorithms like linear and generalized linear regression.
+
+```{r}
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(iris, method=c("center", "scale", "pca"))
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, iris)
+summary(transformed)
+```
+
+### Independent Component Analysis
+
+Transform the data to the independent components. Unlike PCA, ICA retains those components that are independent. You must specify the number of desired independent components with the n.comp argument. Useful for algorithms such as naive bayes.
+
+```{r}
+# calculate the pre-process parameters from the dataset
+preprocessParams <- preProcess(PimaIndiansDiabetes[,1:8], method=c("center", "scale", "ica"), n.comp=5)
+print(preprocessParams)
+
+# transform the dataset using the parameters
+transformed <- predict(preprocessParams, PimaIndiansDiabetes[,1:8])
+summary(transformed)
+```
+
+> Note:  I often ger PCA and ICA confused.  I always seem to have to look them up to make sure I am using the right tool for feature extraction. If you suffer from this too, tlake a look at this [link](http://blog.haunschmid.name/dimensionality-reduction-1-understanding-pca-and-ica-using-r/).  It helps me all the time.
+
+### PreProcess Summary
+
+Below are some tips for getting the most out of data transforms.
+
+- **Use Them**: You are a step ahead if you are thinking about and using data transforms to prepare your data. It is an easy step to forget or skip over and often has a huge impact on the accuracy of your final models.
+- **Use a Variety**: Try a number of different data transforms on your data with a suite of different machine learning algorithms.
+- **Review a Summary**: Summarize your data before and after a transform to understand the effect it had.
+- **Visualize Data**: Visualize the distribution of your data before and after to get a spatial intuition for the effect of the transform.
+
+##Transforming Predictors
+
+In some cases, there is a need to use principal component analysis (PCA) to transform the data to a smaller sub–space where the new variable are uncorrelated with one another. The preProcess class can apply this transformation by including "pca" in the method argument. Doing this will also force scaling of the predictors. Note that when PCA is requested, predict.preProcess changes the column names to PC1, PC2 and so on.
+
+Similarly, independent component analysis (ICA) can also be used to find new variables that are linear combinations of the original set such that the components are independent (as opposed to uncorrelated in PCA). The new variables will be labeled as IC1, IC2 and so on.

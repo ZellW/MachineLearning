@@ -1,0 +1,39 @@
+---
+title: "Calculate Leave-One-Out Prediction for GLM"
+output: html_document
+---
+
+In the model development, the “leave-one-out” prediction is a way of cross-validation, calculated as below:
+
+1. First of all, after a model is developed, each observation used in the model development is removed in turn and then the model is refitted with the remaining observations
+2. The out-of-sample prediction for the refitted model is calculated with the removed observation one by one to assemble the LOO, e.g. leave-one-out predicted values for the whole model development sample.
+
+The `loo_predict()` function below is a general routine to calculate the LOO prediction for any GLM object, which can be further employed to investigate the model stability and predictability.
+
+```{r results='hide', message=FALSE, warning=FALSE}
+pkgs <- c('doParallel', 'foreach', 'stats')
+lapply(pkgs, require, character.only = T)
+```
+```{r message=FALSE, warning=FALSE}
+#registerDoParallel(cores = 8)
+
+data(AutoCollision, package = "insuranceData")
+# A GAMMA GLM #
+model1 <- glm(Severity ~ Age + Vehicle_Use, data = AutoCollision, family = Gamma(link = "log"))
+# A POISSON GLM #
+model2 <- glm(Claim_Count ~ Age + Vehicle_Use, data = AutoCollision, family = poisson(link = "log"))
+
+loo_predict <- function(obj) {
+   yhat <- foreach(i = 1:nrow(obj$data), .combine = rbind) %dopar% {
+        predict(update(obj, data = obj$data[-i, ]), obj$data[i,], type = "response")
+   }
+   return(data.frame(result = yhat[, 1], row.names = NULL))
+ }
+# TEST CASE 1
+test1 <- loo_predict(model1)
+test1$result
+
+# TEST CASE 2
+test2 <- loo_predict(model2)
+test2$result
+```

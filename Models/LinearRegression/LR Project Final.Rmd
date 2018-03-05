@@ -1,0 +1,128 @@
+---
+title: 'Coursera:  Linear Regression Project - mtcars'
+author: "Cliff Weaver"
+date: "October 23, 2015"
+output: html_document
+geometry: margin = .5in
+fontsize: 10pt
+---
+#Executive Summary
+The mtcars dataset is analyzed to evaluate the relationship between a set of variables and miles per gallon (MPG). The data was extracted from the 1974 Motor Trend Magazine providing the MPG and other automobile variables for 32 automobiles (1973–74 models). The analysis explores how automatic and manual transmissions features affect MPG. The data suggests lighter cars with a manual transmission offer better fuel economy compared to heavier cars with an automatic transmissions. Specifically, the analysis suggests cars with manual transmissions get 1.8 more miles per gallon compared to cars with Automatic transmissions.
+
+#Problem Statement
+This document explores the relationship between a set of car variables and miles per gallon (MPG). The specific questions addressed are: 
+
+1.  Is an automatic or manual transmission better for MPG?
+2.  Quantify the MPG difference between automatic and manual transmissions.
+
+# Dataset
+The data is from the 1974 Motor Trend US Magazine and includes fuel consumption and 10 design and performance features of automobile for 32 automobiles (1973-74 models). A table with information about each variable can be found in the appendix (*Figure 1 - Data Definitions*).  Here is a peek of the data after some variables have been transformed to factors. 
+```{r loadData, echo=FALSE, message=FALSE}
+library(dplyr)
+data(mtcars)
+mtcars$vs   <- factor(mtcars$vs, labels=c("V8", "Straight"))
+mtcars$am   <- factor(mtcars$am,labels=c("Automatic","Manual"))
+mtcars$cyl <- factor(mtcars$cyl)
+mtcars$gear <- factor(mtcars$gear)
+mtcars$carb <- factor(mtcars$carb)
+head(select(mtcars, mpg, wt, cyl, hp, qsec, am, vs))
+```
+
+# Exploratory Data Analysis  
+After plotting the relationship between the variables of the mtcars dataset, cylinders, displacement, horsepower, rear axle ratio, weight, engine type and transmission appear to have a correlation with MPG (*Figure 2 - Pairs Plot*).  Also, referencing the boxplot in *Figure 3 - Boxplot Transmission v MPG*, data suggest a relatively large difference between the MPG mean between automatic and manual transmissions. The average MPG for cars with automatic transmissions is 17.17 MPG compared to the average with manual transmissions: 24.39 MPG. (See *Figure 4 - MPG Means*)
+
+##Model Selection
+Multilinear regression analysis is an effective tool to calculate how a car's transmission type (automatic/manual) effects its fuel efficiency while controlling other variables. A baseline model is developed below. (See *Figure 5 - Linear Regression - Single Variable*)
+```{r model_am, echo=FALSE, results='hide'}
+fit_am <- lm(mpg ~ am, data = mtcars)
+```
+```{r fit_am_coef, echo=FALSE}
+summary(fit_am)$coef
+```
+Because the p-value is small, the null hypothesis is rejected and it can be concluded there is linear correlation between the predictor variable transmission type and MPG The baseline model summary returns an adjusted \(R^{2}\) explaining only 34% of the variance. 
+
+Because more variables in this dataset likely have linear correlations with MPG, a multivariable regression model will be used to identify the variables to include in the final model. This adds and removes independent variables to the model until it finds the combination of independent variables that minimizes the AIC of the model.
+```{r model_step, echo=FALSE, results='hide'}
+fit_step = step(lm(data = mtcars, mpg ~ .),direction = "both")
+```
+```{r fit_step}
+summary(fit_step)$coef
+```
+The step regression suggests that cylinders, horsepower, weight and transmission type explain most of the variation with MPG.  Comparing this with the baseline  model, evidence the step model (Best Fit Model) is superior is provided. (See *Figure 6 - Best Fit Model*)
+```{r fit_best, echo=FALSE, results='hide'}
+fit_best <- lm(mpg ~ cyl + hp + wt + am, data = mtcars)
+#summary(fit_best)$coef
+```
+##Residuals examination  
+Reviewing the residual plots of the Best Fit Model, the following observations are made (See *Figure 7 - Residuals*):
+
+* The points in the Residuals vs. Fitted plot appear randomly scattered and support the independence condition. (There is a hint of a curve suggesting it departs slightly from normality. The Chrysler Imperial, Fiat 128, and Toyota Corolla exert some influence on the shape of the curve.)
+* The Normal Q-Q plot fall on the line indicating that the residuals are normally distributed.
+* The Scale-Location plot suggests constant variance.
+* There are some distinct points of interest (outliers or leverage points) in the top right of the plots.  May require future investigation.
+
+#Conclusions
+Based on the data analysis provided herein, the following observations are supported:
+
+- Cars with Manual transmission get 1.8 more miles per gallon compared to cars with Automatic transmission.
+- MPG will decrease by 2.5 for every 1000 lb increase in horsepower.
+- When the number of cylinders increase from 4 to 6 and 8, MPG decreases by a 3 and 2.2 respectively.
+
+\newpage
+
+#Appendix
+##Figure 1: Data Definitions
+Variable Name  |  Description
+-------------  |  -----------
+mpg  | Miles/(US) gallon
+cyl  |  Number of cylinders
+disp  |  Displacement (cu.in.)
+hp  |  Gross horsepower
+drat  |  Rear axle ratio
+wt  |  Weight (lb/1000)
+qsec  |  1/4 mile time
+vs  |  V/S (V - V Engine; S - Straight Engine)
+am  |  Transmission (0 = automatic, 1 = manual)
+gear  |  Number of forward gears
+carb  |  Number of carburetors
+
+##Figure 2 - Pairs Plot
+```{r pairs, echo=FALSE}
+pair_data <- mtcars[, c(1,2,4,6,7,9)]
+pairs(mpg ~ ., data = pair_data, panel= panel.smooth, col=2 + mtcars$wt)
+```
+
+##Figure 3 - Boxplot Transmission v MPG 
+
+```{r boxplot, echo=FALSE, cache=TRUE, fig.width=4.4, fig.height=4.4}
+library(ggplot2)
+ggplot(mtcars, aes(am, mpg)) + geom_boxplot(aes(fill=am, stat="identity")) + labs(x="Transmission") +
+     theme(legend.position="none") + annotate(geom="text", x=1, y=17.8, size=3, label="Mean = 17.15 MPG") +
+     annotate(geom="text", x=2, y=23.6, size=3, label="Mean = 24.39 MPG")
+```
+
+##Figure 4 - MPG Means
+
+```{r echo=FALSE}
+by(mtcars$mpg, list(mtcars$am), summary)
+```
+
+##Figure 5 - Linear Regression - Single Variable 
+
+```{r echo=FALSE}
+fit1 <- lm(mpg ~ am, mtcars)
+summary(fit1)$coef; summary(fit1)$adj.r.squared
+```
+##Figure 6 - Best Fit Model
+```{r app_fit_best, echo=FALSE, results='hide'}
+fit_best <- lm(mpg ~ cyl + hp + wt + am, data = mtcars)
+```
+```{r}
+summary(fit_best)$coef
+```
+
+##Figure 7 - Residuals
+```{r, plot_residuals, echo=FALSE, fig.height=4,fig.width=8}
+par(mfrow = c(1,2), mar = c(4, 4, 2, 1))
+plot(fit_best)
+```

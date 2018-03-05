@@ -1,0 +1,83 @@
+---
+title: "Linear Discriminant Analysis"
+output: html_document
+---
+
+Linear discriminant analysis (LDA) is a method used in statistics, pattern recognition and machine learning to find a linear combination of features that characterizes or separates two or more classes of objects or events. The resulting combination may be used as a linear classifier, or, more commonly, for dimensionality reduction before later classification.
+
+LDA is closely related to analysis of variance (ANOVA) and regression analysis, which also attempt to express one dependent variable as a linear combination of other features or measurements. However, ANOVA uses categorical independent variables and a continuous dependent variable, whereas discriminant analysis has continuous independent variables and a categorical dependent variable (i.e. the class label). Logistic regression and probit regression are more similar to LDA than ANOVA is, as they also explain a categorical variable by the values of continuous independent variables. These other methods are preferable in applications where it is not reasonable to assume that the independent variables are normally distributed, which is a fundamental assumption of the LDA method.
+
+LDA is also closely related to principal component analysis (PCA) and factor analysis in that they both look for linear combinations of variables which best explain the data. LDA explicitly attempts to model the difference between the classes of data. PCA on the other hand does not take into account any difference in class, and factor analysis builds the feature combinations based on differences rather than similarities. Discriminant analysis is also different from factor analysis in that it is not an interdependence technique: a distinction between independent variables and dependent variables (also called criterion variables) must be made.
+
+> From the n independent variables of your dataset, LDA extracts p <= n new indepdendent variables that separate the most classes of the dependent variable. LDA is a supervised dimensionality model.
+
+```{r}
+# Importing the dataset
+dataset = read.csv('../data/Wine.csv')
+
+# Splitting the dataset into the Training set and Test set
+# install.packages('caTools')
+library(caTools)
+set.seed(123)
+split = sample.split(dataset$Customer_Segment, SplitRatio = 0.8)
+training_set = subset(dataset, split == TRUE)
+test_set = subset(dataset, split == FALSE)
+
+# Feature Scaling
+training_set[-14] = scale(training_set[-14])
+test_set[-14] = scale(test_set[-14])
+
+# Applying LDA
+library(MASS)
+lda = lda(formula = Customer_Segment ~ ., data = training_set)#because there are 3 clases, LDA will automatically calculate k-1 = 2 linear discriminants. (Ignore Posterior .X clumns, theu are simply calcualted values used to derive x.LDx)
+training_set = as.data.frame(predict(lda, training_set))#LDA returns a matrix, not a dataframe like PCA
+training_set = training_set[c(5, 6, 1)]
+head(training_set)
+
+test_set = as.data.frame(predict(lda, test_set))
+test_set = test_set[c(5, 6, 1)]
+
+# Fitting SVM to the Training set
+# install.packages('e1071')
+library(e1071)
+classifier = svm(formula = class ~ .,   data = training_set, type = 'C-classification',
+            kernel = 'linear')
+
+# Predicting the Test set results
+y_pred = predict(classifier, newdata = test_set[-3])
+
+# Making the Confusion Matrix
+cm = table(test_set[, 3], y_pred)
+cm#Note PCA got 100% correct. LDA did not.
+
+# Visualizing the Training set results
+library(ElemStatLearn)
+set = training_set
+X1 = seq(min(set[, 1]) - 1, max(set[, 1]) + 1, by = 0.01)
+X2 = seq(min(set[, 2]) - 1, max(set[, 2]) + 1, by = 0.01)
+grid_set = expand.grid(X1, X2)
+colnames(grid_set) = c('x.LD1', 'x.LD2')
+y_grid = predict(classifier, newdata = grid_set)
+plot(set[, -3],
+     main = 'SVM (Training set)',
+     xlab = 'LD1', ylab = 'LD2',
+     xlim = range(X1), ylim = range(X2))
+contour(X1, X2, matrix(as.numeric(y_grid), length(X1), length(X2)), add = TRUE)
+points(grid_set, pch = '.', col = ifelse(y_grid == 2, 'deepskyblue', ifelse(y_grid == 1, 'springgreen3', 'tomato')))
+points(set, pch = 21, bg = ifelse(set[, 3] == 2, 'blue3', ifelse(set[, 3] == 1, 'green4', 'red3')))
+
+# Visualizing the Test set results
+library(ElemStatLearn)
+set = test_set
+X1 = seq(min(set[, 1]) - 1, max(set[, 1]) + 1, by = 0.01)
+X2 = seq(min(set[, 2]) - 1, max(set[, 2]) + 1, by = 0.01)
+grid_set = expand.grid(X1, X2)
+colnames(grid_set) = c('x.LD1', 'x.LD2')
+y_grid = predict(classifier, newdata = grid_set)
+plot(set[, -3], main = 'SVM (Test set)',
+     xlab = 'LD1', ylab = 'LD2',
+     xlim = range(X1), ylim = range(X2))
+contour(X1, X2, matrix(as.numeric(y_grid), length(X1), length(X2)), add = TRUE)
+points(grid_set, pch = '.', col = ifelse(y_grid == 2, 'deepskyblue', ifelse(y_grid == 1, 'springgreen3', 'tomato')))
+points(set, pch = 21, bg = ifelse(set[, 3] == 2, 'blue3', ifelse(set[, 3] == 1, 'green4', 'red3')))
+```

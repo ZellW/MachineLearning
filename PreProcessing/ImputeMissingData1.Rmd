@@ -1,0 +1,84 @@
+---
+title: "Impute Missing Data - The Basics"
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+header-includes: \usepackage{graphicx} \usepackage{mathtools}
+---
+```{r echo=FALSE, message=FALSE, results='hide'}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "dplyr", "gridExtra", "imputeMissings", "RANN", prompt = FALSE)
+#Run Once
+#devtools::install_github("jefferis/RANN")#Had a problem installing RANN via CRAN
+#library(RANN)
+```
+
+## Brief Introduction to Imputing Missing Data
+
+This is just a quick document.  A more thorough one will be developed.  Sometimes short and quick-read docs is all oyu need to get through a problem you might be researching.
+
+Again. make some data.
+
+```{r}
+#Make up some data
+income <- round(runif(100, min = 35000, max = 350000), 0)
+age <- round(runif(100, min=18, max=72), 0)
+myData <- data.frame(age, income)
+noise <- round(runif(100, min = 1500, max = 15000), 0)
+myData$income <- myData$income + noise
+myData <- arrange(myData, desc(income))
+myData$education <- as.factor(sample(c("High School", "Bachelors", "Masters", "Doctorate"), 100, replace = TRUE, 
+                                     prob =c(0.7, 0.15, 0.12, 0.03) ))
+head(myData, 5)
+
+#add some missing data this time
+myData$age[sample(1:nrow(myData),15)] <- NA
+myData$income[sample(1:nrow(myData),10)] <- NA
+myData$education[sample(1:nrow(myData),10)] <- NA
+summary(myData)
+```
+
+### Impute missing values with median/mode
+
+Use `impute()` with `imputeMissings` to impute missing values with mdedian/mode. This method is simple and fast but treats each predictor independently and may not be 100% accurate.
+
+```{r}
+myDataImputed1 <- impute(myData, method = "median/mode")
+summary(myDataImputed1)
+```
+
+The median/mode method imputes mode to character vectors and median to numeric and integer vectors.  You see the 10 missing values for variable “education” are imputed with “High School” since it is the **mode**.
+
+You can also use `preProcess()` but it only works for numeric variables.
+
+```{r}
+myDataImputed2 <- preProcess(myData[, c("income", "age")], method = "medianImpute")
+myDataImputed2 <- predict(myDataImputed2, myData[, c("income", "age")])
+summary(myDataImputed2)
+```
+
+### Impute missing values based on K-nearest neighbors
+
+k-nearest neighbor will find the k closest samples in the training set and impute the mean of those neighbors.
+
+> This method considers all predictors together. It requires them to be in the same scale since the euclidian distance is used.
+
+```{r eval=FALSE}
+myDataImputed3 <- preProcess(myData[, c("income", "age")], method = "knnImpute", k=2)
+myDataImputed3 <- predict(myDataImputed3, myData[, c("income", "age")])
+```
+<span style="color:red">Error in FUN(newX[, i], ...) : cannot impute when all predictors are missing in the new data point</span>
+
+We get an error saying *cannot impute when all predictors are missing in the new data point*. It is because there is at least one sample with both “income” and “age” missing. We can delete these and do it again.
+
+```{r}
+myBadDataRows <- which(is.na(myData$income) & is.na(myData$age))
+
+myDataImputed3 <- preProcess(myData[-myBadDataRows, c("income", "age")],method = "knnImpute", k=2)
+myDataImputed3 <- predict(myDataImputed3,myData[-myBadDataRows, c("income", "age")])
+summary(myDataImputed3)
+```
+The error doesn’t show up this time. This method considers all predictors together but it requires them to be in the same scale since the “euclidian distance” is used to find the neighbours.

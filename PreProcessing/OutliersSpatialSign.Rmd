@@ -1,0 +1,52 @@
+---
+title: "Outlier Detection - spacialSign"
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+header-includes: \usepackage{graphicx} \usepackage{mathtools}
+---
+```{r echo=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "dplyr", "corrplot", "lattice", "e1071", "gridExtra", prompt = FALSE)
+```
+
+## Resolve Outliers
+
+Even under certain assumptions we can statistically define outliers, it can be hard to define in some situations. Some models are resistant to outliers (such as tree-based models and support vector machines). If a model is sensitive to outliers (like linear regression and logistic regression), we can use *spatial sign transformation* to minimize the problem. This procedure projects the predictor values onto a multidimensional sphere. This has the effect of making all the samples the same distance from the center of the sphere.  (Factors are not allowed.)
+
+> It is important to center and scale the predictor data prior to using this transformation.
+
+> This does not remove outliers - it is just a preprocessing method which brings the outliers towards the majority of the data.
+
+Once again, `caret` comes to the rescue.  (I am seriously considering spending the next year just learning everything the `caret` package can do!)
+
+First, create some data - yes, similar to the same one I have been using but with a few changes to bring out the outliers for this exercise.
+
+```{r}
+#Make up some data
+income <- sample(seq(50000, 150000, by = 500), 95)
+age <- income/2000-10
+noise <- round(runif(95) * 10, 0)
+age <- age + noise
+income <- c(income, 10000, 15000, 300000, 250000, 230000)
+age <- c(age, 30, 20, 25, 35, 95)
+myData <- data.frame(income, age)
+myData$education <- as.factor(sample(c("High School", "Bachelor", "Master", "Doctor"), 100, 
+                                     replace = TRUE, prob =c(0.7, 0.15, 0.12, 0.03) ))
+```
+
+Use `spatialSign()` in `caret` to conduct spatial sign:
+
+```{r}
+myTrans <- preProcess(myData[, c("income", "age")], method=c("center", "scale"))
+myTransformed <- predict(myTrans, myData[, c("income", "age")])
+myTransformed2 <- spatialSign(myTransformed)
+myTransformed2 <- as.data.frame(myTransformed2)
+head(myTransformed2, 10)
+p1 <- xyplot(income ~ age, data = myTransformed, main="Original")
+p2 <- xyplot(income ~ age, data = myTransformed2, main="After Spatial Sign")
+grid.arrange(p1, p2, ncol = 2)
+```

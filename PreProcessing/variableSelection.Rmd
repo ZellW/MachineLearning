@@ -1,0 +1,329 @@
+---
+title: "Variable Selection"
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "glmnet", prompt = FALSE)
+```
+
+## Feature Selection - Variable Selection (or variable selection) with GBM
+
+So, what if you want to reduce you data’s high dimensionality but still need to preserve you variables?
+
+PCA variables will not do the trick as they’re synthetic and made up of bits and pieces of other variables. A common solution to this conundrum is [variable selection](https://en.wikipedia.org/wiki/Feature_selection).  This is the process of taking a sample of your wide data set and attempt to find the most valuable ones.
+
+We will work with caret and use its function **varImp** (variable importance).
+
+We’re going to use two models: [gbm (Generalized Boosted Models)](https://en.wikipedia.org/wiki/Gradient_boosting), a tree-based classifier and a regression [glmnet (Generalized Linear Models)](https://en.wikipedia.org/wiki/Generalized_linear_model). Approaching a new data set using different models is one way of getting a handle on your data. **gbm uses boosted trees while glmnet uses regression. (Note: gbm can handle NAs but glmnet cannot)**.
+
+Using 2 different models to see if they return the same important variables.  If they provide different models, then an ensembling method to get a more powerful prediction model.
+
+### Get Data - Again
+Using the same data from the highDimensionalData.Rmd
+(https://archive.ics.uci.edu/ml/datasets/Gisette).
+
+```{r}
+gisetteRaw <- read.table("./data/gisette_train.txt", sep = '', header = FALSE, stringsAsFactors = FALSE)    
+g_labels <- read.table("./data/gisette_train.labels", sep = '', header = FALSE, stringsAsFactors = FALSE)   
+
+# build data set - some models want numeric rather than integers so we just to it automatically as a best practice
+gisette_df <- cbind(as.data.frame(sapply(gisetteRaw, as.numeric)), cluster=g_labels$V1)
+rm(gisetteRaw, g_labels)
+```
+We need to split the data into three sets, one for training, one for testing and another for validating.  Validation is used for scoring.
+
+```{r}
+set.seed(1234)
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df)))#50/50 split train and validate
+gisette_df_train_test <- gisette_df[split,]
+gisette_df_validate <- gisette_df[-split,]
+# split AGAIN gisette_df_train_test data set into training and testing
+set.seed(1234)
+split <- sample(nrow(gisette_df_train_test), floor(0.5*nrow(gisette_df_train_test)))
+traindf <- gisette_df_train_test[split,]
+testdf <- gisette_df_train_test[-split,]
+rm(gisette_df, split)
+```
+
+### GBM
+
+#### No Variable Selection
+
+Let’s start with a GBM model. We will use the trainControl function from caret.  This function will cross-validate our data in order to find the best parameters for the GBM model. Warning: this takes a while. . . .
+
+```{r results='hide'}
+# caret requires a factor of non-numeric value
+traindf$cluster <- ifelse(traindf$cluster == 1, "yes", "no")#required to be a factor
+traindf$cluster <- as.factor(traindf$cluster )
+fitControl <- trainControl(method='cv', number=3, returnResamp='none', verboseIter= FALSE, 
+            summaryFunction = twoClassSummary, classProbs = TRUE)#note classProbs to get probabilities for the label factor
+#gbm_model1 <- train(cluster~., data=traindf, trControl=fitControl, method="gbm", metric='roc')
+```
+```{r saveFiles1, eval=FALSE}
+#saveRDS(gbm_model1, "gbm_model1.rds")
+```
+
+```{r loadData1, echo=FALSE}
+gbm_model1 <- readRDS("gbm_model1.rds")
+```
+
+```{r}
+print(gbm_model1)
+```
+
+By printing `gbm_model`, you get the best settings at the bottom of the report:
+
+Tuning parameter `shrinkage` was held constant at a value of 0.1 ROC was used to select the optimal model using the largest value. The final values used for the model were `n.trees` = 150, `interaction.depth` = 3 and `shrinkage = 0.1`.  We will use these values going forward - *this saves lots of time since we do not need to cross validate*.
+
+```{r}
+testdf$cluster <- ifelse(testdf$cluster == 1, "yes", "no")
+testdf$cluster <- as.factor(testdf$cluster)
+predictions <- predict(object = gbm_model1, testdf[,setdiff(names(testdf), 
+              'cluster')], type='raw')#remove the cluster label; raw provides 1 or -1
+head(predictions)
+
+print(postResample(pred=predictions, obs=testdf$cluster))
+#DO NOT summary(gbm_model) - with 5000 variables, it will bomb!
+```
+
+We get ~95.73%. Now, let’s see how many of these variables we can drop and still get a great
+accuracy score. If you print the summary of gbm_model, you will get a list and graph of the best variables. Unfortunately, this is not convenient here as there are 5000 variables.
+
+#### With Variable Selection
+
+This is where the varImp function comes in handy. Lets plot only the top 50 best variables:
+
+```{r}
+head(varImp(gbm_model1, scale=FALSE))#I think this will work
+tail(varImp(gbm_model1, scale=FALSE))
+# only plot top 20 variables
+plot(varImp(gbm_model1, scale=F), top = 50)
+```
+
+Here you see that V3657 is the most predictive feature for the outcome ‘cluster’. No, with a little handy work, we can do a much better job at presenting the information:
+
+```{r niceDisplayPlot}
+# display variable importance on a +/- scale
+vimp <- varImp(gbm_model1, scale=F)
+results <- data.frame(row.names(vimp$importance),vimp$importance$Overall)
+results$VariableName <- rownames(vimp)
+colnames(results) <- c('VariableName','Weight')
+results <- results[order(results$Weight),]
+# we do not want factors, just characters
+results$VariableName <- as.character(results$VariableName)
+# let's display the best 20 features
+results_temp <- tail(results,20)
+par(mar=c(5,5,4,2)) # increase y-axis margin.
+{xx <- barplot(results_temp$Weight, width = 0.85, main = paste("Variable Importance -",'cluster'), horiz = T, 
+              xlab = "< (-) importance > < neutral > < importance (+) >", axes =FALSE, 
+              col = ifelse((results_temp$Weight > 0), 'blue', 'red'))
+axis(2, at=xx, labels=results_temp$VariableName, tick=FALSE, las=2, line=-0.3, cex.axis=0.6)}
+```
+
+Now comes the fun part, let’s run the GBM model different quantities of top variables and score it with our validation set.
+
+```{r gbm2}
+head(results)
+tail(results)
+
+traindf_truncated <- traindf[, c(tail(results$VariableName,2), 'cluster')]#Get two most powerful variables
+# caret requires a factor of non-numeric value
+
+# we don't need parameters as we already know the best ones from previous trainControlcall
+fitControl <- trainControl(method="none")
+
+gbm_model <- train(cluster~., data=traindf_truncated, tuneGrid = expand.grid(n.trees = 150, 
+            interaction.depth = 3, shrinkage = 0.1, n.minobsinnode=10),
+            trControl=fitControl, method="gbm", metric='roc')
+
+predictions <- predict(object=gbm_model, gisette_df_validate[,setdiff(names(traindf_truncated),
+          'cluster')], type='raw')
+head(predictions)
+
+# caret requires a factor of non-numeric value; using the validation set
+gisette_df_validate$cluster <- ifelse(gisette_df_validate$cluster == 1, "yes", "no")
+gisette_df_validate$cluster <- as.factor(gisette_df_validate$cluster)
+print(postResample(pred=predictions, obs=gisette_df_validate$cluster))
+```
+
+Not bad, accuracy of 83.26% with only 2 variables!! Much better than our small PCA set in the previous exercise.
+
+Lets try larger amounts of the top variables and measure accuracy on the validation set. We’ll try anything with a weight larger than 10 (turns out to be 20 variables):
+
+```{r gbm3}
+head(results)
+tail(results)
+
+# Let's start by modeling with different results$Weight values
+traindf_truncated <- traindf[, c(results$VariableName[results$Weight > 10], 'cluster')]
+
+fitControl <- trainControl(method="none")
+gbm_model <- train(cluster~., data=traindf_truncated,
+         tuneGrid = expand.grid(n.trees = 150, interaction.depth = 3, 
+         shrinkage = 0.1, n.minobsinnode=10), trControl=fitControl, method="gbm", metric='roc')
+
+predictions <- predict(object=gbm_model, gisette_df_validate[,setdiff(names(traindf_truncated),
+               'cluster')], type='raw')
+print(postResample(pred=predictions, obs=as.factor(gisette_df_validate$cluster)))
+```
+
+Nice! Accuracy of 93.56% with the top 20 variables, a bit better than with our PCA model. One more. . . . 
+
+```{r gbm4}
+traindf_truncated <- traindf[, c(results$VariableName[results$Weight > 2], 'cluster')]
+fitControl <- trainControl(method="none")
+gbm_model <- train(cluster~., data=traindf_truncated,
+         tuneGrid = expand.grid(n.trees = 150, interaction.depth = 3, 
+         shrinkage = 0.1, n.minobsinnode=10),
+         trControl=fitControl, method="gbm", metric='roc')
+
+predictions <- predict(object=gbm_model, gisette_df_validate[,setdiff(names(traindf_truncated), 
+               'cluster')], type='raw')
+print(postResample(pred=predictions, obs=as.factor(gisette_df_validate$cluster)))
+```
+
+Terrific! Accuracy 95.76%!!!
+
+## Feature Selection - Variable Selection with GLMNET 
+
+Above we worked with GBM, now we will repeat with GLMNET (Regression Model)
+
+### Get Data - Again
+(https://archive.ics.uci.edu/ml/datasets/Gisette).
+
+```{r alreadyGotData}
+rm(list=ls())
+gisetteRaw <- read.table("./data/gisette_train.txt", sep = '', header = FALSE, stringsAsFactors = FALSE)
+g_labels <- read.table("./data/gisette_train.labels", sep = '', header = FALSE, stringsAsFactors = FALSE)
+# build data set
+gisette_df <- cbind(as.data.frame(sapply(gisetteRaw, as.numeric)), cluster=g_labels$V1)
+set.seed(1234)
+split <- sample(nrow(gisette_df), floor(0.5*nrow(gisette_df)))
+gisette_df_train_test <- gisette_df[split,]
+gisette_df_validate <- gisette_df[-split,]
+# split gisette_df_train_test data set into training and testing
+set.seed(1234)
+split <- sample(nrow(gisette_df_train_test), floor(0.5*nrow(gisette_df_train_test)))
+traindf <- gisette_df_train_test[split,]
+testdf <- gisette_df_train_test[-split,]
+rm(gisetteRaw, g_labels)
+```
+
+### GLMNET
+
+#### Full Dataset
+
+Lets change gears with a regression-based model - GLMNET - but still in the caret library as this will allow us to re-use most of our previous code (think about that - you have over 150 models supported in caret - type names(getModelInfo()) to see the full list of supported models). Let’s generalize our outcome name and predictor names going forward. This is a good habit and will make code re-use much easier.  This is a big file so it is slow and may return a warning stating that maxit should be larger - we can ignore that here as its beyond the scope of this exercise.
+
+```{r}
+outcome_name <- 'cluster'
+predictors_names <- setdiff(names(traindf), outcome_name)
+# caret requires a factor of non-numeric value
+traindf$cluster <- ifelse(traindf$cluster == 1, "yes", "no")
+traindf$cluster <- as.factor(traindf$cluster )
+fitControl <- trainControl(method='cv', number=3, returnResamp='none', 
+            summaryFunction = twoClassSummary, classProbs = TRUE)
+#glmnet_model <- train(x=traindf[, predictors_names], y = traindf[, outcome_name], 
+#                 method = "glmnet", metric = "roc", trControl = fitControl)
+```
+```{r saveFiles2, eval=FALSE}
+saveRDS(glmnet_model, "glmnet_model.rds")
+```
+
+```{r}
+glmnet_model <- readRDS("glmnet_model.rds")
+```
+
+Print the glmnet_model object to get the best parameters.
+
+```{r}
+print(glmnet_model)
+```
+
+The final values used for the model were alpha = 0.1 and lambda = 0.2136412.  We run the base predictions on the full data set:
+
+```{r}
+# caret requires a factor of non-numeric value
+testdf$cluster <- ifelse(testdf$cluster == 1, "yes", "no")
+testdf$cluster <- as.factor(testdf$cluster )
+predictions <- predict(object=glmnet_model, testdf[,setdiff(names(testdf), 'cluster')], type='raw')
+head(predictions)
+
+print(postResample(pred=predictions, obs=as.factor(testdf$cluster)))
+```
+
+Accuracy is 94.86%
+
+#### Variable Selection Dataset
+
+Now let’s look at the variables using varImp (this may take a while as you are plotting 5000 vertical bars):
+
+```{r}
+head(varImp(glmnet_model,scale=F)$importance,100)
+```
+
+If you look closely, you see that GLMNET returns variable importance on a positive and negative scale! The positive variable coefficients are important to predict the outcome, while the negative one predict the none outcome. Those in the middle at zero are non-predictive. This is quite a handy feature if you need to explain which feature predicts what direction!
+
+Let’s see if we can plot this by removing intermediary values:
+
+```{r}
+# display variable importance on a +/- scale
+vimp <- varImp(glmnet_model, scale=F)
+results <- data.frame(row.names(vimp$importance),vimp$importance$Overall)
+results$VariableName <- rownames(vimp)
+colnames(results) <- c('VariableName','Weight')
+results <- results[order(results$Weight),]
+# we do not want factors, just characters
+results$VariableName <- as.character(results$VariableName)
+par(mar=c(5,5,4,2)) # increase y-axis margin.
+xx <- barplot(results$Weight, width = 0.85, main = paste("Variable Importance -",'cluster'), horiz = T, 
+              xlab = "< (-) importance > < neutral > < importance (+) >", axes = FALSE, 
+              col = ifelse((results$Weight > 0), 'blue', 'red'))
+axis(2, at=xx, labels=results$VariableName, tick=FALSE, las=2, line=-0.3, cex.axis=0.6)
+```
+
+Still not ideal, let’s remove more of the middle variables. Let’s use the handy subset
+
+```{r}
+# display variable importance on a +/- scale
+vimp <- varImp(glmnet_model, scale=F)
+results <- data.frame(row.names(vimp$importance),vimp$importance$Overall)
+results$VariableName <- rownames(vimp)
+colnames(results) <- c('VariableName','Weight')
+results <- results[order(results$Weight),]
+# remove all zero variables - non-predictive
+results <- subset(results, results$Weight > 0.0001 | results$Weight < -0.0001 )
+# we do not want factors, just characters
+results$VariableName <- as.character(results$VariableName)
+par(mar=c(5,5,4,2)) # increase y-axis margin.
+xx <- barplot(results$Weight, width = 0.85, main = paste("Variable Importance -",'cluster'), horiz = T, 
+              xlab = "< (-) importance > < neutral > < importance (+) >", axes = FALSE, 
+              col = ifelse((results$Weight > 0), 'blue', 'red'))
+axis(2, at=xx, labels=results$VariableName, tick=FALSE, las=2, line=-0.3, cex.axis=0.6)
+```
+
+Now we see that V3020 is the most positive predictor while V2354, the most negative.  Lets try the above variable threshold that captures some positive and negative influencers:
+
+```{r}
+traindf_truncated <- traindf[, c(results$VariableName, 'cluster')]
+dim(traindf_truncated)
+
+fitControl <- trainControl(method="none")
+predictors_names <- setdiff(names(traindf_truncated), 'cluster')
+glmnet_model <- train(traindf_truncated[,predictors_names], traindf[,outcome_name], method='glmnet', 
+            metric='roc', trControl=fitControl, tuneGrid = expand.grid(alpha=0.1, lambda=0.1))
+
+predictions <- predict(object=glmnet_model, gisette_df_validate[,setdiff(names(traindf_truncated), 
+             'cluster')], type='raw')
+# caret requires a factor of non-numeric value
+gisette_df_validate$cluster <- ifelse(gisette_df_validate$cluster == 1, "yes", "no")
+gisette_df_validate$cluster <- as.factor(gisette_df_validate$cluster )
+print(postResample(pred=predictions, obs=gisette_df_validate$cluster))
+```

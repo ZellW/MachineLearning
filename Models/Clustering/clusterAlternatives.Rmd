@@ -1,0 +1,85 @@
+---
+title: "Alternative Clustering"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){
+    install.packages("easypackages")
+    library(easypackages)
+}
+packages("factoextra", "dbscan", "cluster", "fpc", prompt = FALSE)
+```
+
+### Introduction
+
+K-Means Clustering is the most popular algorithm for clustering analysis.  However, it has limitations including:
+
+- User specifies the number of clusters in advance
+- Initial centroids are randomly selected
+
+Below we explore some alternative strategies that intend to overcome the limitations.
+
+### Hierarchical K-Means Clustering
+
+A hybrid method called Hierarchical K-Means Clustering improved upon the base K-Means.
+
+```{r}
+df <- scale(iris[,-5])
+newKmeans <- hkmeans(df,3)
+fviz_dend(newKmeans, cex=0.6, palette = "jco", rect = TRUE, rect_border = "jco", rect_fill = TRUE)
+fviz_cluster(newKmeans, palette="jco", repel=TRUE, ggtheme=theme_classic())
+```
+
+### Fuzzy Clustering
+
+Fuzzy Clustering is considered as soft clustering where each element has  a probability of belonging to each cluster.  Each element has a set of coefficients corresponding to the degree of being in each cluster.  This is different from K-Means clustering where each object is associated to one cluster only.
+
+Fuzzy C-Means (FCM) is the most widely used fuzzy clustering algorithm.  *fanny()*, part of the cluster package, is used to compute fuzzy clustering.
+
+```{r tryFuzzy}
+fuzzy <- fanny(df, 3)# fuzzy clustering with k=3
+fviz_cluster(fuzzy, ellipse.type = "norm", repel = TRUE, palette="jco", ggtheme=theme_classic(), lengend="right")
+fviz_silhouette(fuzzy, palette="jco", ggtheme=theme_minimal())
+```
+
+### Density Based Clustering
+
+DBSAN (Density-Based Spatial Clustering and Application with Noise) is a popular density clustering algorithm.  Density Clustering is useful when the clusters might be irregularly shaped.
+
+We will use a different data set to illustrate this.
+
+```{r}
+df2 <- multishapes[1:2]
+plot(df2)
+
+km <- kmeans(df2, 5, nstart=25)
+fviz_cluster(km, df2, geom = "point", ellipse = FALSE, show.clust.cent = FALSE, palette="jco", ggtheme=theme_classic())
+```
+
+Using K-Means above inaccurately identifies the 5 clusters we know to exist.
+
+```{r}
+mydbscan <- dbscan(df2, eps=0.15, MinPts=5)
+fviz_cluster(mydbscan, df2, stand=FALSE, ellipse = FALSE, show.clust.cent = FALSE, geom = "point", palette="jco", ggtheme=theme_classic())
+```
+
+The results of dbscan are available to review:
+```{r}
+print(mydbscan)
+```
+The column name 0 above indicates the outliers.
+
+`dbscan` requires users to specify the optimal *eps* values and the parameter *MinPts*.  How do you define these?  (MinPts you simply manually adjust.)
+
+There is a function to help identify the *eps* value:
+
+```{r}
+dbscan::kNNdistplot(df2, k=5)
+abline(h=0.15, lty=2)
+```
+
+I added the horizontal line for emphasis.  You can see that the elbow appears to be close to y=0.15.
+
+> In the fpc package, a function called *predict.dbscan* is available to make predictions on new data using the format:  predict.dbscan(object, data, newdata)
+

@@ -1,0 +1,88 @@
+---
+title: "Natural Language Processing"
+output: html_document
+---
+
+Natural Language Processing (or NLP) is applying Machine Learning models to text and language. Teaching machines to understand what is said in spoken and written word is the focus of Natural Language Processing. Whenever you dictate something into your iPhone / Android device that is then converted to text, that’s an NLP algorithm in action.
+
+You can also use NLP on a text review to predict if the review is a good one or a bad one. You can use NLP on an article to predict some categories of the articles you are trying to segment. You can use NLP on a book to predict the genre of the book. And it can go further, you can use NLP to build a machine translator or a speech recognition system, and in that last example you use classification algorithms to classify language. Speaking of classification algorithms, most of NLP algorithms are classification models, and they include Logistic Regression, Naive Bayes, CART which is a model based on decision trees, Maximum Entropy again related to Decision Trees, Hidden Markov Models which are models based on Markov processes.
+
+A very well-known model in NLP is the Bag of Words model. It is a model used to preprocess the texts to classify before fitting the classification algorithms on the observations containing the texts.
+
+In this part, you will understand and learn how to:
+
+1. Clean texts to prepare them for the Machine Learning models
+2. Create a Bag of Words model
+3. Apply Machine Learning models onto this Bag of Worlds model
+
+```{r}
+# Importing the dataset
+dataset_original = read.delim('../data/Restaurant_Reviews.tsv', quote = '', stringsAsFactors = FALSE)
+# quote is very useful in NLP - it ignores all quotes.  Note stringsAsFactors = FALSE for NLP.
+
+#Will end up with a sparse matrix where each word is its own column.  Of course we will try to minimize the number
+#of columns to make the model more accurate
+#
+# Cleaning the texts
+# install.packages('tm')
+# install.packages('SnowballC')
+library(tm)
+library(SnowballC)
+
+corpus = VCorpus(VectorSource(dataset_original$Review))#from tm package
+class(corpus)
+#Look at some content on corpus using 2 methods:
+corpus[[1]]$content
+as.character(corpus[[1]])
+
+corpus[[500]]$content
+as.character(corpus[[500]])
+
+corpus = tm_map(corpus, content_transformer(tolower))
+corpus = tm_map(corpus, removeNumbers)
+corpus = tm_map(corpus, removePunctuation)
+corpus = tm_map(corpus, removeWords, stopwords())#from Snowball
+corpus = tm_map(corpus, stemDocument)
+corpus = tm_map(corpus, stripWhitespace)
+
+# Creating the Bag of Words model (sparse amtrix)
+dtm = DocumentTermMatrix(corpus)
+dtm#Note that Sparsity = 100% and 1577 words
+dtm = removeSparseTerms(dtm, 0.999)#keeps 99.9% of the columns
+dtm# Sparsity 99% with 691 words
+
+dataset = as.data.frame(as.matrix(dtm))#Classification Algo requires a data frame
+dataset$Liked = dataset_original$Liked
+
+# Below is the same Random Forest Model we used before.
+# Encoding the target feature as factor
+dataset$Liked = factor(dataset$Liked, levels = c(0, 1))
+
+# Splitting the dataset into the Training set and Test set
+# install.packages('caTools')
+library(caTools)
+set.seed(123)
+split = sample.split(dataset$Liked, SplitRatio = 0.8)
+training_set = subset(dataset, split == TRUE)
+test_set = subset(dataset, split == FALSE)
+
+# Fitting Random Forest Classification to the Training set
+# install.packages('randomForest')
+library(randomForest)
+# Remove the Liked column - number 692
+classifier = randomForest(x = training_set[-692], y = training_set$Liked, ntree = 10)
+
+# Predicting the Test set results
+y_pred = predict(classifier, newdata = test_set[-692])
+y_pred[1:20]
+
+# Making the Confusion Matrix
+cm = table(test_set[, 692], y_pred)
+cm
+
+accuracy <- (79+70)/200
+accuracy
+```
+
+Not bad accuracy given the training set was small for NLP analysis.
+> Naive Bayes, Decsion Tree, Random Forest are also often used in NLP

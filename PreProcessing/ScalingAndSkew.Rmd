@@ -1,0 +1,114 @@
+---
+title: "Data Preprocessing - Focus on Scaling & Skew"
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+header-includes: \usepackage{graphicx} \usepackage{mathtools}
+---
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "dplyr", "corrplot", "lattice", "e1071", prompt = FALSE)
+```
+
+## Centering and Scaling
+
+It is the most straightforward data transformation. It centers and scales a variable to mean 0 and standard deviation 1. It ensures that the criterion for finding linear combinations of the predictors is based on how much variation they explain and therefore improves the numerical stability. 
+
+```{r}
+head(cars)
+
+trans<-preProcess(cars, method=c("center","scale"))
+transformed <- predict(trans,cars)
+{par(mfrow=c(1, 2))
+hist(cars$dist, main="Original", xlab="dist")
+hist(transformed$dist, main="Centered and Scaled", xlab="dist")}
+```
+
+Sometimes you only need to scale the variable. For example, if the model adds penalty to the parameter estimates (such as L~2~ penalty is ridge regression and L~1~ penalty in LASSO), the variables need to have similar scale to ensure a fair variable selection. 
+
+Here is a helpful function:
+
+```{r}
+qscale<-function(dat){
+  for (i in 1:ncol(dat)){
+    up <- quantile(dat[,i], 0.99)
+    low <- quantile(dat[,i], 0.01)
+    diff <- up-low
+    dat[,i] <- (dat[, i]-low)/diff
+  }
+  return(dat)
+}
+```
+
+> Note: 99% and 1% quantile are used instead of maximum and minimum values to resist the impact of outliers.
+
+In order to illustrate, let’s simulate a data set with three variables: income, age and education. (This might look familar since I have used this fake data before).
+
+```{r}
+#Make up some data
+income <- round(runif(100, min = 35000, max = 350000), 0)
+age <- round(runif(100, min=18, max=72), 0)
+myData <- data.frame(age, income)
+noise <- round(runif(100, min = 1500, max = 15000), 0)
+myData$income <- myData$income + noise
+myData <- arrange(myData, desc(income))
+myData$education <- as.factor(sample(c("High School", "Bachelors", "Masters", "Doctorate"), 
+                                     100, replace = TRUE, prob =c(0.7, 0.15, 0.12, 0.03) ))
+summary(myData[,c("income","age")])
+```
+
+Clearly income and age are not on the same scale.Apply the function qscale() on the  data.
+
+```{r}
+myNewData <- qscale(myData[, c("income", "age")])
+summary(myNewData)
+```
+
+Now the scales of income and age are aligned (and remember extreme outliers have been removed).
+
+## Resolve Skewness
+
+Skewness is defined to be the third standardized central moment. Does that help?  (It does for the math whizzes.)  You can easily tell if a distribution is skewed by simple visualization. There are different ways may help to remove skewness such as log, square root or inverse. However it is often difficult to determine from plots which transformation is most appropriate for correcting skewness. The Box-Cox procedure automatically identified a transformation from the family of power transformations that are indexed by a parameter λ.
+
+This family includes:
+
+- log transformation (λ=0)
+- square transformation (λ=2)
+- square root (λ=0.5)
+- inverse (λ=−1)
+- others in-between
+
+Use `preProcess()` in `caret` to apply this transformation by changing the method argument.
+
+```{r}
+mySkew1 <- preProcess(cars, method = c("BoxCox"))
+mySkew1
+```
+
+The output shows the sample size (50), number of variables (2) and the λ estimates for each variable. After calling `preProcess()`, `predict()` method applies the results to a data frame.
+
+```{r}
+myTransformed <- predict(mySkew1, cars)
+{par(mfrow=c(1,2))
+hist(cars$dist, main="Original", xlab="dist")
+hist(transformed$dist, main="After BoxCox Transformation", xlab="dist")}
+```
+
+An alternative is to use `BoxCoxTrans()` in `caret`.  Is it a good thing or a bad thing to have multiple ways to get to the same result?  I prefer to pick one and stick to it.  In this case, I prefer `BoxCoxTrans()`.  It is just easier to remember.
+
+You can use function skewness() in package e1071 to get the skewness statistics.
+
+```{r}
+myBoxCoxTrans <- BoxCoxTrans(cars$dist)
+myBoxCoxTrans
+```
+
+```{r}
+myTransformed2 <- predict(myBoxCoxTrans, cars$dist)
+skewness(myTransformed2)#required e1071
+```
+
+The estimated λ is the same 0.5. Original skewness is 0.759 and after transformation, the skewness is -0.01902765 which is close to 0. 

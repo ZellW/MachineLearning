@@ -1,0 +1,216 @@
+---
+title: "ML2_Classification"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){
+    install.packages("easypackages")
+    library(easypackages)
+}
+packages("class", "gmodels", "dplyr", "tm", "e1071", prompt = FALSE)#kernlab needed for spam data
+```
+
+## Introduction
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_Classification1.JPG")
+```
+
+Often used for:
+- Text Categorization
+- Fraud Detection 
+- Natural Lnaguage Processing
+- Market Segmentation
+- Bioinformatics
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_Classification2.JPG")
+```
+
+## KNN
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_KNN1.JPG")
+```
+
+KNN supports a variety of distance mmeasures for continuous variables:
+
+- Euclidean (by far the most popular)
+- Manhattan Distance
+- Minkowski Distance
+
+Distance measurements for categorical variables must use the Hamming Distance.
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_KNN2.JPG")
+knitr::include_graphics("./images/ML2_KNN3.JPG")
+```
+
+```{r}
+# Read data 
+wdbc<- read.csv("../ML/data/cancer.csv")
+glimpse(wdbc)
+
+wdbc <- wdbc[-1]#Remove ID column
+
+#Target label must be a factor
+wdbc$diagnosis <- factor(wdbc$diagnosis, levels = c('B', 'M'), labels = c('Benign', 'Malignant'))
+
+wdbc <- wdbc[sample(nrow(wdbc)), ]#Randomize the data to remove any ordering effects - REMEBER THIS!
+lapply(wdbc[2:11], function(x) { max(x) - min(x) })#2-11 are columns of means
+
+wdbcNormalized <- as.data.frame(scale(wdbc[-1]))#
+glimpse(wdbcNormalized)
+
+summary(wdbcNormalized[c('radius_mean', 'area_worst', 'symmetry_se')])
+
+wdbcTraining <- wdbcNormalized[1:427, ]
+wdbcTest <- wdbcNormalized[428:569, ]
+
+wdbcTrainingLabels <- wdbc[1:427, 1]
+wdbcTestLabels <- wdbc[428:569, 1]
+glimpse(wdbcTestLabels)
+
+wdbcPredictedLabels <- knn(train = wdbcTraining, test = wdbcTest, cl = wdbcTrainingLabels, k=21)
+wdbcPredictedLabels
+
+CrossTable(x = wdbcTestLabels, y = wdbcPredictedLabels, prop.chisq = F, dnn = c('actual', 'predicted'))
+```
+
+## Naive-Bayes Classifier
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_NaiveBayes.JPG")
+
+knitr::include_graphics("./images/ML2_NaiveBayes2.JPG")
+
+knitr::include_graphics("./images/ML2_NaiveBayes3.JPG")
+
+knitr::include_graphics("./images/ML2_NaiveBayes4.JPG")
+
+knitr::include_graphics("./images/ML2_NaiveBayes5.JPG")
+
+knitr::include_graphics("./images/ML2_NaiveBayes6.JPG")
+```
+
+```{r}
+#Importing data
+sms_raw <- read.delim("../ML/data/sms_raw.txt", header=FALSE, encoding = "latin1")
+glimpse(sms_raw)
+#Exploring and preparing data
+names(sms_raw)<-c("type","text")
+str(sms_raw)
+sms_raw$type <- factor(sms_raw$type)
+#sms_raw$text <- iconv(sms_raw$text, to = "utf-8")
+table(sms_raw$type)
+
+#processing text data for analysis
+sms_corpus <- Corpus(VectorSource(sms_raw$text),readerControl = list(language="en_US"))
+length(sms_corpus)
+
+#Clean Data
+corpus_clean <- tm_map(sms_corpus, tolower)
+corpus_clean <- tm_map(corpus_clean, removeNumbers)
+corpus_clean <- tm_map(corpus_clean, removeWords, stopwords())
+corpus_clean <- tm_map(corpus_clean, removePunctuation)
+corpus_clean <- tm_map(corpus_clean, stripWhitespace)
+#corpus_clean <- tm_map(corpus_clean, PlainTextDocument)
+#PlainTextDocument results an error when sms_dtm is created below.  Here is the error:
+#Error in simple_triplet_matrix(i, j, v, nrow = length(terms), ncol = length(corpus),  : 
+#  'i, j' invalid
+
+# Note:The DocumentTermMatrix() function will take a corpus and create a data structure called a sparse matrix,
+# in which the rows of the matrix indicate documents (that is, SMS messages) and the columns indicate terms (that is, words). Each cell in the matrix stores a number indicating a count of the times the word indicated by the column appears in the document indicated by the row
+# To prevent error, read this:
+# https://stackoverflow.com/questions/18504559/twitter-data-analysis-error-in-term-document-matrix
+sms_dtm <- DocumentTermMatrix(corpus_clean)
+
+#creating training and test datasets
+
+# Take 75% percent data for training and for testing we take 25% 
+# splitting the raw data frame
+sms_raw_train <- sms_raw[1:2388, ]
+sms_raw_test  <- sms_raw[2389:3184, ]
+
+# Take 75% percent data for training and for testing we take 25% 
+sms_dtm_train <- sms_dtm[1:2388, ]
+sms_dtm_test  <- sms_dtm[2389:3184, ]
+
+# And finally, the corpus
+sms_corpus_train <- corpus_clean[1:2388]
+sms_corpus_test  <- corpus_clean[2389:3184]
+
+#creating indicator features for frequent words
+Dictionary <- function(x) {
+  if( is.character(x) ) {
+    return (x)
+  }
+  stop('x is not a character vector')
+}
+#Not useful.  length(Dictionary(findFreqTerms(sms_dtm_train, 5))) --> 1084
+sms_dict <- Dictionary(findFreqTerms(sms_dtm_train, 5))
+
+sms_dict <- length(findFreqTerms(sms_dtm_train, 5))#words must appear at least 5 times
+sms_train <- DocumentTermMatrix(sms_corpus_train, list(dictionary = sms_dict))
+sms_test  <- DocumentTermMatrix(sms_corpus_test, list(dictionary = sms_dict))
+
+convert_counts <- function(x) {
+  x <- ifelse(x > 0, 1, 0)
+  x <- factor(x, levels = c(0, 1), labels = c("No", "Yes"))
+  return(x)
+}
+
+sms_train <- apply(sms_train, MARGIN = 2, convert_counts)
+sms_test  <- apply(sms_test, MARGIN = 2, convert_counts)
+
+#training a model on the data
+sms_classifier <- naiveBayes(sms_train, sms_raw_train$type)
+
+#evaluating model performance
+sms_test_pred <- predict(sms_classifier, sms_test)
+
+CrossTable(sms_test_pred, sms_raw_test$type,
+           prop.chisq = FALSE, prop.t = FALSE,
+           dnn = c('predicted', 'actual'))
+```
+
+## Linear Discriminant Analysis (LDA)
+
+---
+title: "ML2_LDA"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){
+    install.packages("easypackages")
+    library(easypackages)
+}
+packages("MASS", "dplyr", prompt = FALSE)
+```
+
+## Introduction
+
+```{r out.width = "500px", echo=FALSE}
+knitr::include_graphics("./images/ML2_LDA1.JPG")
+
+knitr::include_graphics("./images/ML2_LDA2.JPG")
+```
+
+## Code Example
+
+```{r}
+#Fragments of glass data
+glimpse(fgl)
+
+# Perform the LDA on fgl dataset
+data.lda <- lda(formula = type ~ ., data = fgl)
+data.lda
+# perform prediction
+data.lda.pred <-predict(data.lda, newdata=fgl[,c(1:9)])$class
+data.lda.pred
+### Determine how well the model fits.
+table(data.lda.pred,fgl[,10])
+```
+

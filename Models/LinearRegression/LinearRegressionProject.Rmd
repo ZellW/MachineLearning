@@ -1,0 +1,180 @@
+---
+title: "Linear Regression Project"
+output: 
+     html_document:
+          toc: true
+          theme: united
+---
+#Executive Summary
+The mtcars dataset is analyzed to evaluate the relationship between a set of variables and miles per gallon (MPG). The data was extracted from the 1974 Motor Trend Magazine providing the MPG and other automobile variables for 32 automobiles (1973–74 models). Regression models and exploratory data analyses to mainly explore how automatic and manual transmissions features affect MPG. The analysis supports the conclusion that lighter cars with a manual transmission offer better fuel economy as measured by MPG when compared to heavier cars with an automatic transmissions.
+
+#Problem Statement
+Motor Trend Magazine is interested in exploring the relationship between a set of variables and miles per gallon (MPG) (outcome). They are particularly interested in the following two questions:  
+
+1.  *Is an automatic or manual transmission better for MPG* 
+2.  *Quantify the MPG difference between automatic and manual transmissions*
+
+#Methodology
+1. Is there a relationship between MPG and the type of transmission?
+2. How strong is the relationship between MPG and transmission type?
+3. What other variables contribute to MPG?
+4. How accurately can we measure the estimate the effect of each variable on MPG?
+Is the relationship linear?
+
+# The Data
+The data was extracted from the 1974 Motor Trend US magazine and comprises fuel consumption and 10 aspects of automobile design and performance for 32 automobiles (1973-74 models). A table with more detailed information about each variable can be found in the appendix (Figure 1 - mtcars Data).  Here is a peek of the data after some varibles have been transformed to factors.  A more complete view can be found in the Appendix, Figure 2:  Data Variable Definitions.
+```{r loadData, echo=FALSE, message=FALSE}
+library(dplyr)
+data(mtcars)
+mtcars$vs   <- factor(mtcars$vs, labels=c("V8", "Straight"))
+mtcars$am   <- factor(mtcars$am,labels=c("Automatic","Manual"))
+mtcars$cyl <- factor(mtcars$cyl)
+mtcars$gear <- factor(mtcars$gear)
+mtcars$carb <- factor(mtcars$carb)
+head(select(mtcars, mpg, cyl, hp, qsec, am))
+```
+
+# Exploratory Data Analysis  
+Plotting the relationship between all the variables of the mtcars dataset we observe the variables cyl, disp, hp, drat, wt, vs and am have a correlation with mpg (Figure 2 - Pairs Plot).  Additionally, referencing the boxplot in Figure 4 - Boxplot Transmission v MPG, evidence suggests there is a relatively large difference between the mpg mean between automatic and manual transmission cars. The average MPG for cars with automatic transmissions is 17.17 MPG compared to the average for cares with manual transmisisons: 24.39 MPG.  There is also strong evidence  the transmission types represent a different populations.  See the output from the t-test in Figure 5 - MPG Means.
+
+If the the type of tranmission was the sole factor in determining mpg, we can calcualte the transmission impact on mpg by using a single variable in a linear regression.  We find in Figure 6 - Linear Regression - Single Variable a manual transmission increases gas mileage by 7.24 mpg assuming all other variables are held constant.  We also find the transmission type accounts for only 36% of the mpg variance.
+
+## Model Selection  
+The regsubsets() function (part of the leaps library) is implemented to perform forward stepwise, backward and full stepwise selection, using the argument method=“forward”, method=“backward” oe mthod="full".  The code to execute these functions can be seen in Figure ##.  regsubsets calculations identify the most impactful variables on mpg by model below.
+
+Model  |  Variable 1  |  Variable 2  |  Variable 3  |  Variable 4
+-----  |  ----------  |  ----------  |  ----------  |  ----------
+Forward  |  weight  |  cylinders  |  horsepower  |  transmission
+Backward  |  weight  |  quarter mile time  |  transmission  |  horepower
+Full  |  weight  |  quarter mile time  |  transmission
+
+##Model Slection Part 2 - Traditional Methodology
+Multilinear regression analysis is an effective tool to assess how the car's transmission type (automatic/manual) effects its fuel efficiency while controlling other variables. To set a baseline model, we first etransmission type as the variable as predictors pf mpg:
+```{r model_am, echo=FALSE, results='hide'}
+fit_am <- lm(mpg ~ am, data = mtcars)
+```
+```{r fit_am_coef, echo=FALSE}
+summary(fit_am)$coef
+```
+Because the very small p-value from teh model above, the null hypothesis is rejectedand we say that there is linear correlation between the predictor variable am and mpg. The model summary reurns an adjusted \(R^{2}\) that explains only 34% of the variance. 
+
+Because there are more variables in this dataset that appear to have linear correlations with mpg, a multivariable regression model will be used to identify the variables to include in the final model - a stepwise regression function, step(). This  adds and removes independent variables to the model until it finds the combination of independent variables that minimizes the AIC of the model.
+```{r model_step, echo=FALSE, results='hide'}
+fit_step = step(lm(data = mtcars, mpg ~ .),direction = "both")
+```
+```{r fit_step}
+summary(fit_step)$coef
+```
+The step regression suggests that cyl, hp, wt and am explain most of the varation with mpg.  Comparing this suggested model with the first model where we analyzed mpg and am we find substantial evidence the the step model is superiror:
+```{r fit_best, echo=FALSE, results='hide'}
+fit_best <- lm(mpg ~ cyl + hp + wt + am, data = mtcars)
+#summary(fit_best)$coef
+```
+```{r anova, echo=FALSE}
+anova(fit_am, fit_best)
+```
+
+$$mpg = \beta_0 + \beta_1 am + \beta_2 qsec + \beta_3 wt + \epsilon$$
+
+
+## Residuals examination  
+Figure 9 exmmines the residuals vs. fitted values, as well as standardized residuals theoretical quantiles. The conclusions is there does not seem to be significant outliers other than three instances (the ones noted in the graph).  
+
+
+# Answers to the Questions  
+
+- "Is an automatic or manual transmission better for MPG”  
+Because the coefficient for **am** is **positive (11.9385)**, and am takes 1 as the value for manual, **manual transmission** is better for MPG.  
+
+- "Quantify the MPG difference between automatic and manual transmissions"  
+With weight and number of cylinders being equal, a car with manual transmission will have an improved MPG in the value of **11.9385 minus 2.3689 times the weight of car divided by 1,000, subtract the number of cylinders mutiplied by 1.1814, further subtract 4.1974 times the weight divided by 1,000, finally plus 34.2830.** (refer to figure 6's coefficients)   
+
+<div style="page-break-after: always;"></div>
+
+# Appendix
+
+##Figure 1 - mtcars Data
+```{r, cache=TRUE, fig.width=6, fig.height=4}
+data(mtcars)
+str(mtcars)
+mtcars$vs   <- factor(mtcars$vs, labels=c("V8", "Straight"))
+mtcars$am   <- factor(mtcars$am,labels=c("Automatic","Manual"))
+head(mtcars)
+## the distribution between two kinds of transmissions
+table(mtcars$am)
+```
+
+## Figure 2:  Data Variable Definitions
+
+Variable Name  |  Description
+-------------  |  -----------
+mpg  | Miles/(US) gallon
+cyl  |  Number of cylinders
+disp  |  Displacement (cu.in.)
+hp  |  Gross horsepower
+drat  |  Rear axle ratio
+wt  |  Weight (lb/1000)
+qsec  |  1/4 mile time
+vs  |  V/S (V - V Engine; S - Straight Engine)
+am  |  Transmission (0 = automatic, 1 = manual)
+gear  |  Number of forward gears
+carb  |  Number of carburetors
+
+##Figure 3 - Pairs Plot
+```{r pairs}
+pairs(mpg ~ ., data = mtcars, panel=panel.smooth, col=2 + mtcars$wt)
+```
+
+##Figure 4 - Boxplot Transmission v MPG 
+```{r, boxplot, cache=TRUE, fig.width=3, fig.height=2}
+library(ggplot2)
+ggplot(mtcars, aes(am, mpg)) + geom_boxplot(aes(fill=am, stat="identity")) + labs(x="Transmission") +
+     theme(legend.position="none") + annotate(geom="text", x=1, y=17.8, size=3, label="Mean = 17.15 MPG") +
+     annotate(geom="text", x=2, y=23.6, size=3, label="Mean = 24.39 MPG")
+```
+
+##Figure 5 - MPG Means
+```{r}
+by(mtcars$mpg, list(mtcars$am), summary)
+t.test(mtcars$mpg ~ mtcars$am)
+```
+##Figure 6 - Linear Regression - Single Variable 
+```{r}
+fit1 <- lm(mpg ~ am, mtcars)
+summary(fit1)$coef
+summary(fit1)$adj.r.squared
+```
+
+or instance, we see that the R2 statistic increases from 32%, when only one variable is included in the model, to almost 55%, when all variables are included. As expected, the R2 statistic increases monotonically as more variables are included
+```{r regsubsets}
+library(dplyr)
+library(leaps)
+library(ggvis)
+regfit.full <- regsubsets(mpg ~ ., data = mtcars, nvmax=11)
+regfit.fwd <- regsubsets(mpg ~ ., data = mtcars, nvmax=11, method="forward")
+regfit.back <- regsubsets(mpg ~ ., data = mtcars, nvmax=11, method="backward")
+
+summary(regfit.full)
+summary(regfit.fwd)
+summary(regfit.back)
+
+plot(regfit.full,scale="adjr2")
+plot(regfit.fwd,scale="adjr2")
+plot(regfit.back,scale="adjr2")
+
+reg.summary <- summary(regfit.full)
+reg.summary$rsq
+rsq <-  as.data.frame(reg.summary$rsq)
+names(rsq) <-  "R2"
+rsq %>% ggvis(x=~ c(1:nrow(rsq)), y=~R2) %>% 
+     layer_points(fill= ~ R2) %>%
+     add_axis("y", title="r2") %>% 
+     add_axis("x", title="Numer of variables")
+
+```
+
+```{r, fig.height=4,fig.width=8}
+#par(mfrow = c(1,2), mar = c(4, 4, 2, 1))
+#plot(fit4, which=1)
+#plot(fit4, which=2)
+```

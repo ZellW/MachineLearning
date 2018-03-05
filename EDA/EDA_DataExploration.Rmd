@@ -1,0 +1,234 @@
+---
+title: "EDA_Data Exploration"
+output: html_document
+---
+
+```{r message=FALSE, warning=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("readr", "reshape2", "plyr", "dplyr", "ggplot2", "corrplot", "psych", "caret", prompt = FALSE)
+#Remember - `plyr` before `dplyr`
+```
+
+## Basic Exploration Pair-wise correlations 
+
+Now that we have all our data transformed into numbers, we are ready to take a deeper look at it. Here we’ll build two functions, a pair-wise correlation function and a more complicated function to get the p-value and correlation for each feature pair in the data. 
+
+A great way to explore new data is to use a pairwise correlation matrix. This will measure the correlation between every combination of your variables. It doesn’t really matter if you have an outcome (or response) variable at this point, it will compare everything against everything else. 
+
+For those not familiar with the correlation coeﬃcient, it is simply a measure of similarity between two vectors of numbers. The measure value can range between 1 and -1, where 1 is perfectly correlated, -1 is perfectly inversly correlated, and 0 is not correlated at all:
+
+```{r}
+print(cor(1:5,1:5))#perfectly correlated
+print(cor(1:5,seq(100,500,100)))#1,2,3,4,5  and 100, 200, 300, 400, 500
+print(cor(1:5,5:1))#perfectly uncorrelated
+print(cor(1:5,c(1,2,3,4,4)))
+```
+
+We’ll use the mtcars data set that is already included in the R base package - it has the advantage of being fully numeric and clean.
+
+```{r message=FALSE, warning=FALSE}
+data_set <- mtcars 
+#d_cor <- as.matrix(cor(data_set))#Why as.matrix?
+d_cor <- cor(data_set)
+d_cor
+```
+
+For example, if you compare the two left utmost columns, we see that mpg is negatively correlated to cycl. Remember, correlations range from 1 to -1, with 1 being absolutely positively correlated, -1 being absolutely negatively correlated and 0 showing no correlations at all.
+`      mpg        cyl   `    
+`mpg 1.0000000 -0.8521620`
+
+```{r}
+d_cor_melt <- plyr::arrange(melt(d_cor), -(value))#hte minus sign simply orders values descending
+print(paste("The number of records is: ", nrow(d_cor_melt)))
+
+# clean up 
+pair_wise_correlation_matrix <- filter(d_cor_melt, Var1 != Var2)#remove perfect correlations
+print(paste("The number of records is now: ", nrow(d_cor_melt)))
+
+pair_wise_correlation_matrix <- filter(pair_wise_correlation_matrix, is.na(value)==FALSE)
+print(paste("The number of records is now: ", nrow(d_cor_melt)))
+
+# remove pair dups 
+head(pair_wise_correlation_matrix)
+
+pair_wise_correlation_matrix <- 
+     pair_wise_correlation_matrix[seq(1, nrow(pair_wise_correlation_matrix), by=2),]#remove every other row
+
+print(paste("The number of records is now: ", nrow(pair_wise_correlation_matrix)))
+
+plot(pair_wise_correlation_matrix$value)
+```
+
+The plot above shows there are variables that are highly correlated in the top lift and negatively correlated in the lower right.  The ones in the middle are more random with little correlation.
+
+Lets build the above into a function:
+
+```{r}
+Get_Fast_Correlations <- function(data_set, features_to_ignore=c(), size_cap=5000) {
+     data_set <- data_set[, setdiff(names(data_set), features_to_ignore)]
+     if (size_cap > nrow(data_set)) {
+          data_set = data_set[sample(nrow(data_set), size_cap),]
+     } else {
+               data_set = data_set[sample(nrow(data_set), nrow(data_set)),]
+          }
+     d_cor <- as.matrix(cor(data_set))
+     d_cor_melt <- arrange(melt(d_cor), -(value))
+     # clean up
+     pair_wise_correlation_matrix <- filter(d_cor_melt, Var1 != Var2)
+     pair_wise_correlation_matrix <- filter(pair_wise_correlation_matrix, is.na(value)==FALSE)
+     # remove pair dups
+     #dim(pair_wise_correlation_matrix)
+     pair_wise_correlation_matrix <- pair_wise_correlation_matrix[seq(1, 
+                                   nrow(pair_wise_correlation_matrix), by=2), ]
+     #dim(pair_wise_correlation_matrix)
+     plot(pair_wise_correlation_matrix$value)#optional
+     return(pair_wise_correlation_matrix) 
+}
+```
+
+## `psych` Package Correlation & Significance
+
+We use the psych (https://cran.r-project.org/web/packages/psych/index.html) library to do a lot of the heavy lifting. Delegate all the math to the corr.test function. It returns the following results (from the help ﬁles and plenty more there: ?corr.test): 
+
+- **r**: The matrix of correlations - just like above
+- **n**: Number of cases per correlation 
+- **t**: Value of t-test for each correlation 
+- **p**: Two tailed probability of t for each correlation 
+- **se**: Standard error of the correlation 
+- **ci**: The alpha/2 lower and upper values
+
+```{r}
+data_set <- mtcars 
+featurenames_copy <- names(data_set)#psych uses it own nam,s - lets keep the meaningful ones
+# strip var names to index for pair wise identification 
+names(data_set) <- seq(1:ncol(data_set)) 
+head(data_set)
+cor_data_df <-  psych::corr.test(data_set)
+cor_data_df$r#correlations
+# apply var names to correlation matrix over index 
+rownames(cor_data_df$r) <- featurenames_copy 
+colnames(cor_data_df$r) <- featurenames_copy
+names(cor_data_df)
+cor_data_df
+```
+
+Let’s visualize our correlation results using cor.plot from the [psych] (https://cran.r-project.org/web/packages/psych/index.html) library and corrplot.mixed from the [corrplot] (https://cran.r-project.org/web/packages/corrplot/vignettes/corrplot-intro.html)library.
+
+```{r}
+psych::cor.plot(cor_data_df$r)
+```
+
+Or even prettier with the `corrplot` library:
+
+```{r}
+corrplot.mixed(cor_data_df$r, lower="circle", upper="color", tl.pos="lt", diag="n", 
+               order="hclust", hclust.method="complete")
+```
+ 
+We are not going to add these plotting functions into our pipeline but  will create a function using the corr.test results to highlight the strongest relationships. 
+
+Lets build our pipeline function, discard all results except for the signiﬁcance (p-value) and correlations and set our cut-oﬀ thresholds:
+
+```{r}
+Get_Top_Relationships <- function(data_set, correlation_abs_threshold=0.8, pvalue_threshold=0.01) {
+     feature_names <- names(data_set)
+     # strip var names to index for pair-wise identification     
+     names(data_set) <- seq(1:ncol(data_set))     
+     # calculate correlation and significance numbers     
+     cor_data_df <-  psych::corr.test(data_set)
+     # apply var names to correlation matrix over index     
+     rownames(cor_data_df$r) <- feature_names
+     colnames(cor_data_df$r) <- feature_names
+     # top cor and sig
+     relationships_set <- cor_data_df$ci[,c('r','p')]
+     # apply var names to data over index pairs
+     relationships_set$feature_1 <- feature_names[as.numeric(sapply(strsplit(rownames(relationships_set), "-"), `[`, 1))]
+     relationships_set$feature_2 <- feature_names[as.numeric(sapply(strsplit(rownames(relationships_set), "-"), `[`, 2))]
+     relationships_set <- select(relationships_set, feature_1, feature_2, r, p) %>% dplyr::rename(correlation=r, pvalue=p)
+     # return only the most insteresting relationships
+     return(filter(relationships_set, abs(correlation) > correlation_abs_threshold | pvalue < pvalue_threshold) %>%
+                 arrange(pvalue))
+}
+```
+
+```{r}
+data_set <- mtcars 
+dim(Get_Top_Relationships(mtcars))
+head(Get_Top_Relationships(mtcars))
+```
+
+## findCorrelations $ `caret`
+
+Recall previously we looked a nearZeroVar.
+
+findCorrelation is fast without detail.
+
+```{r}
+data_set <- mtcars
+d_cor <- cor(data_set)
+d_cor
+top_correlations <- findCorrelation(d_cor, cutoff = 0.8, verbose = FALSE)#cutoff is above and below .8
+top_correlations
+names(data_set)[top_correlations]
+```
+
+## Outlier Detection
+
+There are diﬀerent ways of hunting down outliers in a data set but a simple approach is to take the mean or the median of the data and look for any points beyond x standard deviations [68–95–99.7 rule] (https://en.wikipedia.org/wiki/68%E2%80%9395%E2%80%9399.7_rule)
+
+```{r}
+wt_mean <- mean(mtcars$wt) 
+wt_mean
+
+wt_sd <- sd(mtcars$wt) 
+wt_sd
+```
+
+How many points in wt are outside the 1 sd band?
+
+```{r}
+sum((mtcars$wt > (wt_mean + (wt_sd/2))) | (mtcars$wt < (wt_mean - (wt_sd/2))))
+
+mtcars$wt[(mtcars$wt > (wt_mean + (wt_sd/2))) | (mtcars$wt < (wt_mean - (wt_sd/2)))]
+```
+
+Lets create a simple but useful function to measure the standard deviation of each feature and detect outliers. This function reports outliers but it can also remove the oﬀending feature with the remove_outlying_features function parameter. With just a few extra lines of code it could just as easily impute extreme values down to the mean, 0 or min/max:
+
+```{r}
+#If features are text or date and have not gone thru numerical handling, it would fail - use features_to_ignore
+Identify_Outliers <- function(data_set, features_to_ignore=c(), 
+               outlier_sd_threshold = 2, remove_outlying_features = FALSE) {
+               # get standard deviation for each feature
+               outliers <- c()
+               for (feature_name in setdiff(names(data_set), features_to_ignore)) {
+                    feature_mean <- mean(data_set[,feature_name], na.rm = TRUE)
+                    feature_sd <- sd(data_set[,feature_name], na.rm = TRUE)
+                    outlier_count <- sum(data_set[,feature_name] > (feature_mean + (feature_sd * outlier_sd_threshold)) | 
+                                         data_set[,feature_name] < (feature_mean - (feature_sd * outlier_sd_threshold))) 
+                    if (outlier_count > 0) {
+                         outliers <- rbind(outliers, c(feature_name, outlier_count))
+                         if (remove_outlying_features)
+                              data_set[, feature_name] <- NULL
+                    }
+               } 
+          outliers <- data.frame(outliers) %>% rename(feature_name = X1, outlier_count= X2) %>% 
+               mutate(outlier_count=as.numeric(as.character(outlier_count))) %>% arrange(desc(outlier_count))
+          if (remove_outlying_features) {
+               return(data_set)
+          } else {
+               return(outliers)
+          }
+     } 
+```
+
+```{r}
+head(Identify_Outliers(mtcars, remove_outlying_features=FALSE))
+plot(sort(mtcars$wt))
+``` 
+
+## Notes:
+
+- If there is a high correlation between your dependent and independent variable, then you are lucky and found a predictive feature for your supervised model. 
+- If there is a lot of correlation between your dependent variables then you found redundant features and you can remove one side of the correlation pair. This is actually recommended in linear models. 
+- Multicollinearity hurts linear models and correlation checks can help clean things up. This is not as important for classification models except when you want to prune your feature set down, or if you want to use variable importance in a report, too many overlapping features will complicate things.

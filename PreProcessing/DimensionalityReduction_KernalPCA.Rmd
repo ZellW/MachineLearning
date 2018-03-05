@@ -1,0 +1,137 @@
+---
+title: "Kernal PCA"
+output: html_document
+---
+
+PCA and LDA feature extraction techniques work on linear data - when the data is linearly separable.  Kernal PCA is adapted to non-linear data.  KPCA is unsupervised.
+
+The data points below (on the left) are located mostly along a curve in 2D. PCA cannot reduce the dimensionality from two to one, because the points are not located along a straight line. But still, the data are "obviously" located around a one-dimensional non-linear curve. So while PCA fails, there must be another way! And indeed, kernel PCA can find this non-linear manifold and discover that the data are in fact nearly one-dimensional.
+
+It does so by mapping the data into a higher-dimensional space. This can indeed look like a contradiction, but it is not. The data are mapped into a higher-dimensional space, but then turn out to lie on a lower dimensional subspace of it. So you increase the dimensionality in order to be able to decrease it.
+
+The essence of the "kernel trick" is that one does not actually need to explicitly consider the higher-dimensional space, so this potentially confusing leap in dimensionality is performed entirely undercover. The idea, however, stays the same.
+
+But how do we know in the first place if the data points are non linear for data set which has more than 4 features (the real world case). To visualize such data we need to reduce dimensionality which means we end up using PCA to reduce dimensionality which would be wrong as data might be non linear and we use normal PCA to visualize. Then how does one know whether data is non linear to use kernel PCA rather than PCA?  Answer:  If you are doing machine learning, don't visualize, let your model learn it itself. Basically include a KPCA step in your inner resampling loop and test the kernels as parameters, including the linear kernel and any others you want/can afford to test.
+
+```{r out.width = "500px"}
+knitr::include_graphics("../../MachineLearning/Models/images/KernalPCA1.png")
+```
+
+```{r}
+# Importing the dataset
+dataset = read.csv('../data/Social_Network_Ads.csv')
+dataset = dataset[, 3:5]
+
+# Splitting the dataset into the Training set and Test set
+# install.packages('caTools')
+library(caTools)
+set.seed(123)
+split = sample.split(dataset$Purchased, SplitRatio = 0.75)
+training_set = subset(dataset, split == TRUE)
+test_set = subset(dataset, split == FALSE)
+
+# Feature Scaling
+training_set[, 1:2] = scale(training_set[, 1:2])
+test_set[, 1:2] = scale(test_set[, 1:2])
+```
+
+### Lets first recall what Logistic Regression produced:
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+# Fitting Logistic Regression to the Training set
+classifier = glm(formula = Purchased ~ ., family = binomial, data = training_set)
+
+# Predicting the Test set results
+# The reponse gives the predicted probabilities in a single vector
+prob_pred = predict(classifier, type = 'response', newdata = test_set[-3])
+y_pred = ifelse(prob_pred > 0.5, 1, 0)
+y_pred[1:10]
+
+# Making the Confusion Matrix
+cmOLD = table(test_set[, 3], y_pred)
+
+# Visualizing the Training set results
+library(ElemStatLearn)
+set = training_set
+X1 = seq(min(set[, 1]) - 1, max(set[, 1]) + 1, by = 0.01)
+X2 = seq(min(set[, 2]) - 1, max(set[, 2]) + 1, by = 0.01)
+grid_set = expand.grid(X1, X2)# expand.grid creates a data frame from all combinations of the supplied vectors/factors
+colnames(grid_set) = c('Age', 'EstimatedSalary')
+prob_set = predict(classifier, type = 'response', newdata = grid_set)
+y_grid = ifelse(prob_set > 0.5, 1, 0)
+plot(set[, -3],
+     main = 'Logistic Regression (Training set)',
+     xlab = 'Age', ylab = 'Estimated Salary',
+     xlim = range(X1), ylim = range(X2))
+contour(X1, X2, matrix(as.numeric(y_grid), length(X1), length(X2)), add = TRUE)
+points(grid_set, pch = '.', col = ifelse(y_grid == 1, 'springgreen3', 'tomato'))
+points(set, pch = 21, bg = ifelse(set[, 3] == 1, 'green4', 'red3'))
+```
+
+Let's perform the same analysis but apply Kernal PCA:
+```{r}
+# Applying Kernel PCA
+# install.packages('kernlab')
+library(kernlab)
+kpca = kpca(~., data = training_set[-3], kernel = 'rbfdot', features = 2)
+training_set_pca = as.data.frame(predict(kpca, training_set))
+head(training_set_pca)
+training_set_pca$Purchased = training_set$Purchased#Need to add the dependent variable back for KPCA
+test_set_pca = as.data.frame(predict(kpca, test_set))
+test_set_pca$Purchased = test_set$Purchased
+
+# Fitting Logistic Regression to the Training set
+classifier = glm(formula = Purchased ~ ., family = binomial, data = training_set_pca)
+
+# Predicting the Test set results
+prob_pred = predict(classifier, type = 'response', newdata = test_set_pca[-3])
+y_pred = ifelse(prob_pred > 0.5, 1, 0)
+
+# Making the Confusion Matrix
+cm = table(test_set_pca[, 3], y_pred)
+cm#83% accuracy
+
+#The original logisti regression without KPCA provided ths:
+cmOLD
+
+# Visualising the Training set results
+#install.packages('ElemStatLearn')
+library(ElemStatLearn)
+set = training_set_pca
+X1 = seq(min(set[, 1]) - 1, max(set[, 1]) + 1, by = 0.01)
+X2 = seq(min(set[, 2]) - 1, max(set[, 2]) + 1, by = 0.01)
+grid_set = expand.grid(X1, X2)
+colnames(grid_set) = c('V1', 'V2')
+prob_set = predict(classifier, type = 'response', newdata = grid_set)
+y_grid = ifelse(prob_set > 0.5, 1, 0)
+plot(set[, -3],
+     main = 'Logistic Regression (Training set)',
+     xlab = 'PC1', ylab = 'PC2',
+     xlim = range(X1), ylim = range(X2))
+contour(X1, X2, matrix(as.numeric(y_grid), length(X1), length(X2)), add = TRUE)
+points(grid_set, pch = '.', col = ifelse(y_grid == 1, 'springgreen3', 'tomato'))
+points(set, pch = 21, bg = ifelse(set[, 3] == 1, 'green4', 'red3'))
+
+# Visualising the Test set results
+# install.packages('ElemStatLearn')
+#library(ElemStatLearn)
+set = test_set_pca
+X1 = seq(min(set[, 1]) - 1, max(set[, 1]) + 1, by = 0.01)
+X2 = seq(min(set[, 2]) - 1, max(set[, 2]) + 1, by = 0.01)
+grid_set = expand.grid(X1, X2)
+colnames(grid_set) = c('V1', 'V2')
+prob_set = predict(classifier, type = 'response', newdata = grid_set)
+y_grid = ifelse(prob_set > 0.5, 1, 0)
+plot(set[, -3],
+     main = 'Logistic Regression (Test set)',
+     xlab = 'Age', ylab = 'Estimated Salary',
+     xlim = range(X1), ylim = range(X2))
+contour(X1, X2, matrix(as.numeric(y_grid), length(X1), length(X2)), add = TRUE)
+points(grid_set, pch = '.', col = ifelse(y_grid == 1, 'springgreen3', 'tomato'))
+points(set, pch = 21, bg = ifelse(set[, 3] == 1, 'green4', 'red3'))
+```
+
+Since we used a logistic model, we see a linear separation but what really happens is illustrated below:
+
+```{r out.width = "500px"}
+knitr::include_graphics("../../MachineLearning/Models/images/KernalPCA2.JPG")
+```

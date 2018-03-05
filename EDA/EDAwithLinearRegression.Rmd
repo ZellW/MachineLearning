@@ -1,0 +1,326 @@
+---
+title: "EDA with Linear Regression"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+---
+
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 12px;
+}
+body{ /* Normal  */
+   font-size: 12px;
+}
+td {  /* Table  */
+   font-size: 10px;
+}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;
+}
+h2 { /* Header 2 */
+ font-size: 22px;
+}
+h3 { /* Header 3 */
+ font-size: 18px;
+}
+code.r{ /* Code block */
+  font-size: 10px;
+}
+pre { /* Code block */
+  font-size: 10px
+}
+#table-of-contents h2 {
+background-color: #4294ce;
+}
+#table-of-contents{
+background: #688FAD;
+}
+#nav-top span.glyphicon{
+color: #4294ce;
+}
+#postamble{
+background: #4294ce;
+border-top: ;
+}
+</style>
+---
+
+```{r loadLibs1, warning=FALSE, message=FALSE, echo=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr", "dplyr", "xda", "ggplot2", "readr", "gridExtra", "funModeling", prompt = FALSE)
+```
+
+# Introduction
+
+Linear Regression algorithm is not just for predicting the future. It is actually super useful for gaining practically useful insights about the relationships among the variables in data. Thanks to its simplicity, we can even explain the insights from the model to other people in a human language, not necessarily in a mathematical or scientific language.
+
+How do we use Linear Regression to find insights about the relationship among the variables in a typical exploratory data analysis?
+
+# Data
+
+Queried US Natality data from Google’s hosted public data repository at BigQuery. It is a data set about baby births in US.  
+
+```{r loadData, message=FALSE, results='hide'}
+library(readr)
+births <- read_csv("../EDA/data/births.csv", progress = F)
+df_status(births)
+```
+
+## Explore Data
+
+```{r}
+freq(births, input = c("mother_race", "cigarette_use", "alcohol_use", "is_male"))
+```
+
+```{r message=FALSE}
+freq(births, input = c("plurality"))
+```
+
+```{r}
+plot_num(births)
+```
+
+```{r}
+range(births$father_age)
+#table(births$father_age)
+nrow(filter(births, father_age ==99))
+```
+
+```{r}
+births$father_age <- na_if(births$father_age, 99)
+nrow(filter(births, father_age == 99))
+```
+
+Explore the data by using charts to see if there are any trends that would help understand the relationship between ``gestation_weeks`` variable and the other variables.
+
+```{r}
+sum(is.na(births$gestation_weeks))
+sum(is.na(births$father_age))
+```
+
+
+```{r}
+tmpBirths <- births %>% filter(!is.na(father_age)) %>% sample_n(5000)
+ggplot(tmpBirths, aes(x = father_age, y = gestation_weeks)) + geom_point(shape = 1, alpha = 0.1, color = "blue") + geom_smooth(method=lm)
+
+```
+
+We can’t really see an obvious correlation between the two variables. I’ve enabled a trend line (Linear Regression) inside the chart, and the line looks almost flat.
+
+#Analysis 
+
+## By father_age & father_race
+
+How about if we sliced into each `father_age` category?
+
+Here, I’m showing the same scatter chart for each `father_race`.
+
+```{r message=FALSE, warning=FALSE}
+sum(is.na(tmpBirths$father_race))
+tmpBirths <- tmpBirths %>% filter(!is.na(father_race))
+
+ggplot(tmpBirths, aes(x = father_age, y = gestation_weeks)) + geom_point(shape = 1, alpha = 0.1, color = "blue") + geom_smooth(method=lm) + facet_wrap(~father_race)
+
+```
+Still not obvious, but some of the trend lines are showing upward or downward trends more than before. For example, the trend line for Japanese (38) seems to be showing a highly positive correlation, which means that as the father’s age gets older the `gestation_weeks` becomes longer. However, there seems to be not much data there, so I’m not sure how much we can count on this trend line at this point.
+
+## By mother_age
+
+Here is the similar scatter chart we have already seen above. This time, I’m assigning `mother_age` to X-Axis.
+
+```{r}
+sum(is.na(tmpBirths$mother_age))
+
+ggplot(tmpBirths, aes(x = mother_age, y = gestation_weeks)) + geom_point(shape = 1, alpha = 0.1, color = "blue") + geom_smooth(method=lm) + facet_wrap(~mother_race)
+```
+
+It looks that there is a slight downward trend for a few races which means that as the mother’s age gets older the `gestation_weeks` becomes shorter.
+
+## By Father Race
+
+How about the relationship between `father_race` and `gestation_weeks`. Here, I’m using a Bar chart to show the average `gestation_weeks` periods by each `father_race`. The red dotted line shows the overall average.
+
+```{r}
+fatherRace <- births %>% group_by(father_race) %>% summarise(meanGestation = mean(gestation_weeks))
+ggplot(fatherRace, aes(as.factor(father_race), meanGestation)) + 
+     geom_bar(stat="identity", color = "navy", fill = "navy", alpha = .3) +
+     labs(x="Father Race", y = "Average Gestation")
+```
+
+It’s hard to see the difference, so I’m zooming in to the area around the overall average age, which is 38.69.
+
+```{r}
+ggplot(fatherRace, aes(as.factor(father_race), meanGestation)) + 
+     geom_bar(stat="identity", color = "navy", fill = "navy", alpha = .3) +
+     labs(x="Father Race", y = "Average Gestation") +
+     coord_cartesian(ylim = c(38, 39.2)) + 
+     geom_hline(yintercept = 38.69, linetype = "dashed", color = "red")
+```
+
+Here, we can see some differences. Some races tend to have the `gestation_weeks` longer than the average. On the other hand, others tend to have the `gestation_weeks` shorter. However, we need to be reminded that the differences we are observing here are very small. They are all within less than a week.
+
+## By Mother Race
+
+Let’s look at `nother_race` against `gestation_weeks` the same way we did for `father_race` above.
+
+```{r}
+motherRace <- births %>% group_by(mother_race) %>% summarise(meanGestation = mean(gestation_weeks))
+ggplot(motherRace, aes(as.factor(mother_race), meanGestation)) + 
+     geom_bar(stat="identity", color = "navy", fill = "navy", alpha = .3) +
+     labs(x="Mother Race", y = "Average Gestation") +
+     coord_cartesian(ylim = c(38, 39.2)) + 
+     geom_hline(yintercept = 38.69, linetype = "dashed", color = "red")
+```
+
+Simliar to `father_race`, some `mother_race` tend to be higher and lower than average. 2 (Blacks) seem to be significantly lower.
+
+## By Plurality
+
+How about the relationship between `gestation_weeks` and `plurality`? Are twin or triplet (or even more!) babies are born earlier than single babies?
+
+Here, I’m using a Bar chart assigning `plurality` to X-Axis and `gestation_weeks` to Y-Axis, and also showing a reference line (Red dotted line) to show the overall average of `gestation_weeks`.
+
+```{r}
+gestation <- births %>% group_by(as.factor(plurality)) %>% 
+     summarise(meanGestation = mean(gestation_weeks))
+names(gestation) <-  c("Plurality", "Average_Gestation")
+
+ggplot(gestation, aes(Plurality, Average_Gestation)) + 
+     geom_bar(stat="identity", color = "navy", fill = "navy", alpha = .3) +
+     labs(x="Number of Babies Birthed", y = "Average Gestation") +
+     geom_hline(yintercept = mean(gestation$Average_Gestation), linetype = "dashed", color = "red")
+
+
+```
+
+This one is actually easier to spot the trend. As `plurality` increases the average of the `gestation_weeks` becomes shorter.
+
+Instead of comparing the average of `gestation_weeks` by using Bar chart, we can see how the values of `gestation_weeks` are distributed or spread for each `plurality` number by using Boxplot chart like below.
+
+```{r}
+ggplot(births, aes(as.factor(plurality), gestation_weeks)) + 
+     geom_boxplot(color = "navy", fill = "navy", alpha = .3, na.rm = TRUE) +
+     labs(x="Number of Babies Birthed", y = "Average Gestation")
+```
+
+Y-Axis shows `gestation_weeks` and X-Axis shows `plurality`. Each box represents the range between 25 percentile and 75 percentile of `gestation+weeks` and the center line inside each box indicates the median value of `gestation_weeks`.
+
+This Boxplot chart helps us to compare the distribution of `gestation_weeks` among `plurality` categories. We can see a trend that `gestation_weeks` values tend to go down as the number of `plurality` goes up, though there are some overlaps between them. This leads us to think that there seems to be a negative correlation between `gestation_weeks` and `plurality`.
+
+I’ve got a few hypotheses based on the observations we have made so far.
+
+- `father_age` and `mother_age` don’t seem to be making much difference for `gestation_weeks`, though they might be making a relatively bigger difference within some of the `father_race` or M`mother_race`.
+- `father_race` and `mother_race` seem to be making differences, though the difference is very small, it’s less than a week, in terms of the average `gestation_weeks`.
+- `plurality` seems to be making a big difference for `gestation_weeks`.
+
+Now, let’s evaluate these hypotheses by building Linear Regression models.
+
+## Evaluate with Linear Regression Model
+
+Let’s start evaluating the above hypotheses one by one by building Linear Regression models.
+
+*Correlation is different from Causation.*
+
+But there is one thing to note before moving further. By performing the regression analysis with Linear Regression algorithm we can understand the relationships between the variables better. And we might find that some of the variables might be able to explain a large portion of the changes in ~gestation_weeks`.
+
+But the relationships between the variables we are talking about here are Correlation, which means that the changes in one variable can be observed at a same pace as the changes occur in another variable. Therefore, as I move forward with my analysis I might say something like “the changes in `father_age` would influence on the changes in `gestation_weeks`”, but this doesn’t necessarily mean that the changes in `father_age` are causing '`gestation_weeks`'gestation_weeks` shorter or longer.
+
+But, even if we don’t know if `father_age` is really causing the changes in `gestation_weeks`, just knowing that there is a correlation between them helps us predict or estimate how much `gestation_weeks` would change when we observe a certain amount of changes in `father_age`.
+
+Ok, having said that, let’s evaluate if and how `father_age` influences on `gestation_weeks`.
+
+## gestation_weeks by father_age
+
+```{r}
+model_lm1 = lm(gestation_weeks ~ father_age, data = births)
+summary(model_lm1)
+```
+
+**P-value** in this context is a probability of getting a similar set of changes even when there is no relationship between `father_age` and `gestation_weeks`. And if the probability is small enough (the very commonly known threshold is 5% but it can be higher or lower depending on the nature of the analysis.), then we would think that there has to be some degree of `father_age`’ influence on `gestation_weeks`.
+
+Here, the P-value is ~0.0000018, and it’s quite a small number. This means that if we assume that `father_age` doesn’t have any influence on the changes in `gestation_weeks`, the probability of getting a similar set of the changes in `gestation_weeks` is only ~0.00018% (0.0000018 / 100). Therefore, we can practically conclude that this `father_age` has something to do with the changes in `gestation_weeks`.
+
+The **coefficient estimate** here can be interpreted as, how much of the change in `gestation_weeks` can be explained (or influenced) by one value increase of `father_age`. The value here shows -0.009, which means that as the `father_age` becomes one year older the `gestation_weeks` would become 0.009 weeks shorter.
+
+### Evaluate Quality of Prediction Model
+
+To understand the quality of the model, there are many useful metrics, but here I want to introduce two practically useful ones.
+
+**R Squared** measures how much of the variability of `gestation_weeks` this model can explain. The values vary between 0 and 1 in most cases and 1 is the highest, which means that the model can explain 100% of the variability of a target variable, in this case, that is `gestation_weeks`.  The R Squared is 0.0007 means it doesn’t really explain the variability of `gestation_weeks`.
+
+So, what is the variability anyway?
+
+Let me use the same Scatter chart earlier to explain this better.  It has been exploded to better serve as an explanatory example.
+
+```{r}
+ggplot(tmpBirths, aes(x = father_age, y = gestation_weeks)) + 
+     geom_point(shape = 1, alpha = 0.1, color = "blue") + geom_smooth(method=lm, se= FALSE) +
+     geom_hline(yintercept = 38.69, linetype = "dashed", color = "red") +
+     coord_cartesian(ylim = c(35, 42.5)) 
+```
+
+Here, I’m showing `father_age` at X-Axis and `gestation_weeks` at Y-Axis, and each dot represents each baby. Also, I’m showing a Trend Line (Linear Regression Model) as Blue Line to show the trend of the relationship between `father_age` and `gestation_weeks` as a straight line, and a Reference Line as Red Line to show the Average of `gestation_weeks`.
+
+Now, as you recall, the R-Squared for this model is 0.0007.
+
+Well, this 0.0007 actually is a byproduct of the difference between the Blue and the Red lines. Compared to the average reference line (Red), the trend line created by Linear Regression model (Blue) covers a bit more of the `gestation_weeks` spread. But, it still stays within a range of 38 and 39 of `gestation_weeks` and is not explaining the whole range of `gestation_weeks` (mainly from 25 to 45) very well.
+
+**Is this model useless with such low R Squared?**
+
+But this doesn’t mean that the coefficient estimate of `father_age` is not reliable. Whether we can conclude if there is any meaningful linear relationship between `father_age` and `gestation_weeks` is entirely up to the P-value, which is another metric under the model summary.
+
+Since we have only one predictor variable, this model level P-value happens to be the same value of P-value for Father Race variable. But when we start adding more variables, this P-value of the model will be different from the P-value for the coefficient of each variable.
+
+Nonetheless, P-value here is quite a small number so we can practically conclude that this prediction model built with `father_age` can explain the changes in `gestation_weeks`, even if the amount of the change it can explain is very tiny.
+
+Another useful metric is **Root Mean Square Error (RMSE)**. This shows the average difference between the actual values and the values this model would predict — Predicted Values. Here, it is showing as about 2.4.
+
+This means that if we used this model to predict the `gestation_weeks` it would make an error (difference) of 2.4 weeks on average.
+
+- What is this model saying?
+
+Now, let’s sum up what we have learned with this regression analysis so far.
+
+- We can conclude that `father_age` does have an impact on `gestation_weeks` and we know that this is not by a chance because the P-Value is quite small. And one year increase of `father_age` would tend to make `gestation_weeks` 0.0082 weeks shorter.
+- But the prediction model built only with `father_age` can explain only 0.05% of the variability of `gestation_weeks`. And, if we use it to predict the `gestation_weeks` you would need to account for about 2.4 weeks errors (difference from the actual values).
+
+> Given that one year increase in `father_age` would make `gestation_weeks` only 0.0082 weeks shorter, 2.4 weeks error looks pretty big.
+
+## mother_age
+
+We have looked at the influence of `father_age` on `gestation_weeks`, but most of you must be thinking that actually `mother_age` should be the one having more influence on `gestation_weeks` than `father_age`. I mean, mothers are the ones carrying and delivering the babies at the end of the day, right?
+
+Let’s evaluate that.
+
+I have switched from `father_age` to `mother_age` for the predictor variable, and re-built the linear regression model. Here’s what I have got.
+
+```{r}
+model_lm2 = lm(gestation_weeks ~ mother_age, data = births)
+summary(model_lm2)
+```
+
+This time, the coefficient estimate of `mother_age` is -0.01, which means that one year increase of `mother_age` would make `gestation_weeks` 0.01 weeks shorter. It was -0.009 with `father_age`, so it seems to me that `mother_age` has more influencing power.
+
+The R Squared is 0.0007 and this is slightly better than `father_age`.
+
+The P-value is still nealry 0 and smaller than 0.0000018 with only `father_age`. This means, not only `mother_age` has something to do with the change in `gestation_weeks` but also it is more reliable than `father_age` to explain the changes.
+
+So far, we have investigated if `father_age` and `mother_age` were influencing `gestation_weeks`, but we did so separately.
+
+But let’s think about this for a second.
+
+Intuitively, we would think that older fathers tend to have babies with older mothers, and younger fathers tend to have babies with younger mothers.  ``father_age`` and ``mother_age`` are probably positively correlated. And if that is the case, when we say ``father_age`` influences on ``gestation_weeks`` as we investigated above, in reality, that might be because ``father_age`` and ``mother_age`` happen to be correlated and ``mother_age`` could be actually the one that is impacting on ``gestation_weeks``.
+
+# Next Steps
+
+So, at this point, we still don’t know which one is really or directly impacting on `gestation_weeks` (making it longer or shorter).
+The good news is, we can turn to the same Linear Regression algorithm to investigate this further. And that’s the topic I’m going to write in the next post. Hint:
+
+```{r}
+model_lm3 = lm(gestation_weeks ~ mother_age + father_age, data = births)
+summary(model_lm3)
+```
+ Want to read ahead?  See https://www.r-bloggers.com/analysis-of-covariance-–-extending-simple-linear-regression/

@@ -1,0 +1,309 @@
+---
+title: "Feature Engineering"
+output: html_document
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("readr", "lubridate", "dplyr", "ggplot2", "infotheo", prompt = FALSE)
+```
+
+## Engineering Dates
+
+Just like we pulled the first word, word count and character count out of text features, we can also do some basic engineering on numerical and date features.
+
+### Dates
+
+A date field can be cast to an integer representation. Day 0 is 1/1/1970 (beginning of Unix time) - as you can imagine, this is very useful for modeling.
+
+```{r}
+print(as.numeric(as.Date('1970-01-01')))
+```
+
+But a date can yield a lot more data than just its integer representation. We’ll use the lubridate library to assist our extractions:
+
+- Extract day, month, and short and long year
+- Day count in year
+- Day of the week
+- Weekend
+- Quarter
+
+> Note: you will notice that there is an optional parameter to remove the original date. Some visualization
+and modeling tools can handle dates automatically but for simplicity here, we want our entire data set to
+be numerical. If that is an issue or if you want to retain the date for visualization and/or reporting, simply
+turn the remove_original_date off.
+
+```{r}
+Feature_Engineer_Dates <- function(data_set, remove_original_date=TRUE) {
+     data_set <- data.frame(data_set)
+     date_features <- names(data_set[sapply(data_set, is.Date)])#is.Date is from lubridate
+     for (feature_name in date_features) {
+          data_set[,paste0(feature_name,'_DateInt')] <- as.numeric(data_set[,feature_name])
+          data_set[,paste0(feature_name,'_Month')] <- as.integer(format(data_set[, feature_name], "%m"))
+          data_set[,paste0(feature_name,'_ShortYear')] <- as.integer(format(data_set[,feature_name], "%y"))
+          data_set[,paste0(feature_name,'_LongYear')] <- as.integer(format(data_set[,feature_name], "%Y"))
+          data_set[,paste0(feature_name,'_Day')] <- as.integer(format(data_set[,feature_name], "%d"))
+          # week day number requires first pulling the weekday label, 
+          # creating the 7 week day levels, and casting to integer
+          data_set[,paste0(feature_name,'_WeekDayNumber')] <- as.factor(weekdays(data_set[, feature_name]))
+          
+          levels(data_set[, paste0(feature_name, '_WeekDayNumber')]) <- 
+               list(Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5, Saturday=6, Sunday=7)
+          
+          data_set[, paste0(feature_name,'_WeekDayNumber')] <- 
+               as.integer(data_set[,paste0(feature_name,'_WeekDayNumber')])
+          
+          data_set[,paste0(feature_name,'_IsWeekend')] <-  
+               as.numeric(grepl("Saturday|Sunday", weekdays(data_set[, feature_name])))
+          
+          data_set[,paste0(feature_name,'_YearDayCount')] <- yday(data_set[,feature_name])
+          data_set[,paste0(feature_name,'_Quarter')] <- lubridate::quarter(data_set[, feature_name], with_year = FALSE)
+          data_set[,paste0(feature_name,'_Quarter')] <- lubridate::quarter(data_set[, feature_name], with_year = TRUE)
+          if (remove_original_date)#delete the original date column only if remove_original_date=TRUE in function call
+               data_set[, feature_name] <- NULL
+     }
+     return(data_set)
+}
+```
+
+### R Code Walkthrough
+
+Develop the data to explore the walkthrough:
+
+```{r}
+data_set <- data.frame(id=c(10,20,30,40,50), gender=c('male','female','female','male','female'), 
+                some_date=c('2012-01-12','2012-01-12','2012-12-01','2012-05-30','2013-12-12'), 
+                value=c(12.34, 32.2, 24.3, 83.1, 8.32), outcome=c(1,1,0,0,0))
+data_set$some_date <- as.Date(data_set$some_date)#this would happen automatically using the pipeline.  Otherwise cast it
+feature_name <- "some_date"
+```
+
+Create new features:
+
+```{r}
+data_set[,paste0(feature_name,'_DateInt')] <- as.numeric(data_set[,feature_name])#Days since 1970 (Unix Time)
+glimpse(data_set)
+data_set[,paste0(feature_name,'_Month')] <- as.integer(format(data_set[, feature_name], "%m"))#month
+data_set[,paste0(feature_name,'_ShortYear')] <- as.integer(format(data_set[,feature_name], "%y"))# 2 digit year
+data_set[,paste0(feature_name,'_LongYear')] <- as.integer(format(data_set[,feature_name], "%Y"))# 4 digit year
+data_set[,paste0(feature_name,'_Day')] <- as.integer(format(data_set[,feature_name], "%d"))# day of month (1-31)
+glimpse(data_set)
+```
+
+Calculate weekday number.  A bit more complicated because of factors, levels and ultimately an integer.
+
+```{r}
+#Make date col a factor.  Keeping original col untouched
+data_set[,paste0(feature_name,'_WeekDayNumberTXT')] <- as.factor(weekdays(data_set[, feature_name]))
+data_set$some_date_WeekDayNumber
+#Define labels for facto column created above
+levels(data_set[, paste0(feature_name, '_WeekDayNumberTXT')]) <- 
+     list(Monday=1, Tuesday=2, Wednesday=3, Thursday=4, Friday=5, Saturday=6, Sunday=7)
+data_set$some_date_WeekDayNumber
+#Replace weekday name with corresponding Level integer value
+data_set[, paste0(feature_name,'_WeekDayNumberINT')] <- as.integer(data_set[,paste0(feature_name,'_WeekDayNumberTXT')])
+glimpse(data_set)
+```
+
+Obviously we would not keep both the Weekday name and weekday integer values in a model!
+
+It is often useful to identify weekend days:
+
+```{r}
+#recall grepl returns TRUE/FALSE
+data_set[,paste0(feature_name,'_IsWeekend')] <- as.numeric(grepl("Saturday|Sunday", weekdays(data_set[, feature_name])))
+data_set$some_date_IsWeekend
+table(data_set$some_date_WeekDayNumberTXT, data_set$some_date_IsWeekend)
+```
+
+
+```{r}
+data_set[,paste0(feature_name,'_YearDayCount')] <- yday(data_set[,feature_name])
+data_set$some_date_YearDayCount#the number of days since Jan 1
+data_set[,paste0(feature_name,'_Quarter')] <- lubridate::quarter(data_set[, feature_name], with_year = FALSE)#
+data_set$some_date_Quarter
+data_set[,paste0(feature_name,'_Quarter')] <- lubridate::quarter(data_set[, feature_name], with_year = TRUE)
+data_set$some_date_Quarter
+glimpse(data_set)
+```
+
+Again, choose between either a quarter as eith a quater integer or one prefixed with the year - not both!
+
+Test the function:
+
+```{r}
+mix_dataset <- data.frame(id=c(10,20,30,40,50), gender=c('male','female','female','male','female'), 
+                some_date=c('2012-01-12','2012-01-12','2012-12-01','2012-05-30','2013-12-12'), 
+                value=c(12.34, 32.2, 24.3, 83.1, 8.32), outcome=c(1,1,0,0,0))
+
+write_csv(mix_dataset, './data/mix_dataset.csv')
+mix_dataset <- read_csv('./data/mix_dataset.csv')
+mix_dataset <- Feature_Engineer_Dates(mix_dataset)
+head(mix_dataset)
+```
+
+> If you replaced read_csv with either read.csv or data.table fread, the some_date variable would not be cast as a Date!!
+
+```{r}
+mix_dataset_tmp <- read.csv('./data/mix_dataset.csv')
+str(mix_dataset_tmp)#date as factor
+
+mix_dataset_tmp <- data.table::fread('./data/mix_dataset.csv')
+str(mix_dataset_tmp)#date a character
+```
+
+## Numerical Engineering
+
+### Integers
+
+First thing we have to do to extract additional intelligence out of an integer is to verify that it actually is an integer:
+
+```{r}
+print(is.integer(1))
+print(class(1))
+print(class(1L))
+```
+
+We cannot count on the is.integer function as it requires the value to be declared as an integer literal (L). Instead we will use the round function (in R 3.3.3 and up you can use `is.wholenumber`). We’ll explore some simple feature engineering to capture:
+
+- Is feature equal to zero
+- Is feature positive
+- Binning feature values
+
+```{r}
+mix_dataset <- data.frame(id=c(1,2,3,4,5), mood=c(0,20,20,40,50), value=c(12.34, 32.2, 24.3, 83.1, 8.32), 
+                          outcome=c(1,1,0,0,0))
+
+write_csv(mix_dataset, './data/mix_dataset.csv')
+mix_dataset <- read_csv('./data/mix_dataset.csv')
+```
+
+```{r}
+Feature_Engineer_Integers <- function(data_set, features_to_ignore=c()) {
+     data_set <- data.frame(data_set)
+     for (feature_name in setdiff(names(data_set), features_to_ignore)) {
+          if (class(data_set[,feature_name])=='numeric' | class(data_set[,feature_name])=='integer') {
+               feature_vector <- data_set[,feature_name]
+               if (all((feature_vector - round(feature_vector)) == 0)) {
+                    # make sure we have more than 2 values excluding NAs
+                    if (nrow(data_set %>% filter_(!is.na(feature_name)) %>% distinct_(feature_name)) > 2) {
+                         #print(feature_name)#not really needed/helpful
+                         data_set[,paste0(feature_name,'_IsZero')] <- ifelse(data_set[,feature_name]==0,1,0)
+                         data_set[,paste0(feature_name,'_IsPositive')] <- ifelse(data_set[,feature_name]>=0,1,0)
+                         # separate data into two bins using infotheo
+                         data_discretized <- discretize(data_set[,feature_name], disc='equalfreq', nbins=2)
+                         data_set[,paste0(feature_name,'_2Bins')] <- data_discretized$X
+                         if (nrow(data_set %>% filter_(!is.na(feature_name)) %>% distinct_(feature_name)) > 4) {
+                              # try 4 bins
+                              data_discretized <- discretize(data_set[,feature_name], disc='equalfreq', nbins=4)
+                              data_set[,paste0(feature_name,'_4Bins')] <- data_discretized$X
+                         }
+                    }
+               }
+          }
+     }
+     return (data_set)
+}
+```
+
+> Note the nonstandard evaluation used in the dplyr statements above.  https://stackoverflow.com/questions/24569154/use-variable-names-in-functions-of-dplyr
+
+### R Code Notes
+
+- `if (all((feature_vector - round(feature_vector)) == 0))` simply ensures all the values in the column are integers - simple and fast!
+- the `infotheo package` easily creates bins of data.  I might prefer the `binr package`.
+
+```{r}
+data_set <- mix_dataset
+feature_name <- "mood"
+
+data_discretized <- discretize(data_set[, feature_name], disc='equalfreq', nbins=2)
+data_discretized$mood
+```
+
+Now lets test it all at once:
+
+```{r}
+mix_dataset <- read_csv('./data/mix_dataset.csv')
+Feature_Engineer_Integers(mix_dataset, features_to_ignore=c('id'))
+```
+
+### Numbers
+
+Feature engineering of numbers is an enormous subject that we’ll keep under control here. Most feature engineering should come out of the business context, something we can automate here. Here, we’ll look at some simple transformations that are applicable to a lot of data sets on whole/real numbers:
+
+```{r}
+Feature_Engineer_Numbers <- function(data_set, features_to_ignore=c()) {
+     data_set <- data.frame(data_set)
+     date_features <- setdiff(names(data_set[sapply(data_set, is.numeric)]), features_to_ignore)
+     for (feature_name in date_features) {
+          feature_vector <- data_set[,feature_name]
+          if (is.integer(feature_vector) | is.numeric(feature_vector)) {
+               if (any((feature_vector - round(feature_vector)) != 0)) {
+                    # make sure we have more than 2 values excluding NAs
+                    if (nrow(data_set %>% filter_(!is.na(feature_name)) %>% distinct_(feature_name)) > 2) {
+                         # print(feature_name)#Not really helpful
+                         # polynomial transformation
+                         poly_vector <- poly(x=feature_vector, degree = 2)
+                         data_set[,paste0(feature_name, "_poly1")] <- poly_vector[,1]
+                         data_set[,paste0(feature_name, "_poly2")] <- poly_vector[,2]
+                         # log transform
+                         data_set[,paste0(feature_name, "_log")] <- log(x = feature_vector)
+                         # exponential transform
+                         data_set[,paste0(feature_name, "_exp")] <- exp(x = feature_vector)
+                         # rounding
+                         data_set[,paste0(feature_name, "_rnd")] <- round(x = feature_vector, digits = 0)
+                         # binning into 2 bins
+                         data_discretized <- discretize(data_set[,feature_name], disc='equalfreq', nbins=2)
+                         data_set[,paste0(feature_name,'_2Bins')] <- data_discretized$X
+                    }
+               }
+          }
+     }
+     return(data_set)
+}
+```
+
+
+```{r}
+
+mix_dataset <- data.frame(id=sample(1:100, 100, replace=F), value=runif(100, 1.0, 55.5))
+write_csv(mix_dataset, './data/mix_dataset.csv')
+mix_dataset <- read_csv('./data/mix_dataset.csv')
+head(Feature_Engineer_Numbers(mix_dataset, features_to_ignore=c()))
+```
+
+The Feature_Engineer_Numbers function will only transform features containing real numbers. It then applies a 2-degree polynomial transform, a simple log and exponential transform. It also rounds the data and splits it into two buckets using library infotheo. All these transformations are highly customizable, you could try 3-degree polynomial transform, round only to the 1st or 2nd digit. You could split the data into many more bins. Depending on the data, a few things can break, whether or not you have negative numbers, and too much or too little variation. This would definitely be an ideal candidate for a try/ catch error handling.
+
+For more information on the following transformer functions:
+
+- Log, Exp (http://www.inside-r.org/r-doc/base/log)
+- poly/log (https://stat.ethz.ch/R-manual/R-devel/library/stats/html/poly.html)
+- discretize (http://www.inside-r.org/packages/cran/infotheo/docs/discretize)
+
+## Pipeline Check
+
+```{r}
+remove(list=ls())
+source("../EDA/PipelineFunctions.R")
+
+mix_dataset <- data.frame(id=c(1,2,3,4,5), gender=c('male','female','female','male','female'), 
+                some_date=c('2012-01-01','2013-01-01','2014-01-01','2015-01-01','20 16-01-01'), 
+                mood=c(0,20,20,NA,50), value=c(12.34, 32.2, 24.3, 83.1, 8.32), 
+                outcome=c(1,1,0,0,0)) 
+ 
+write_csv(mix_dataset, '../EDA/data/mix_dataset.csv') 
+mix_dataset <- as.data.frame(read_csv('../EDA/data/mix_dataset.csv')) 
+ 
+# automated pipeline 
+mix_dataset <- Get_Free_Text_Measures(data_set = mix_dataset)#no change since there is no free text
+mix_dataset <- Binarize_Features(data_set = mix_dataset, leave_out_one_level = TRUE)#changes Gender
+mix_dataset <- Impute_Features(data_set = mix_dataset, use_mean_instead_of_0 = TRUE)#Replaces the NA
+mix_dataset <- Feature_Engineer_Dates(data_set = mix_dataset)#Extract detail from Data variable
+mix_dataset <- Feature_Engineer_Integers(data_set = mix_dataset)#Auto Bin the integers-many cols added
+mix_dataset <- Feature_Engineer_Numbers(data_set = mix_dataset)#creates some Inf because not enough numbers to run the exp in this case.  Need to run Impute again to clean up the new colmns afeter feature engineering
+
+head(mix_dataset,2)
+summary(mix_dataset)
+```

@@ -1,0 +1,137 @@
+---
+title: "Simple Linear Regression Walkthrough"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+##Part 1
+
+In this sequence, we are going to get started working with a regression model, just using a simple simulation. I am using simulated data and a basic linear regression model with R. So, on my screen here I have some R codes we are going to use for the simulation. So first I have this function sim.reg.data. 
+
+I am just going to simulate my regression data. We are going to do single regression with multiple variations. So, we just have an x and a y here. We are just going to try to predict our y value from the x value. And the first thing we do is to compute some random noise from a normal distribution, some realizations from the normal distribution. And then we compute a data frame of those realizations. But basically a sequence from x1 to x2, y1 to y2. And we add noise to the y. So really a simple simulation.
+
+I am just going to go 1, 1, 10, 10, 300, 1. So I am going to have a line going from xy (1, 1) to xy (10, 10). And I am going to have 300 points and a standard deviation of 1.
+```{r}
+set.seed(1234)
+sim.reg.data <- function(x1, y1, x2, y2, n, sd){
+  w <- rnorm(n, mean=0, sd=sd)
+  data.frame(
+            x = seq(from = x1, to = x2, length.out =n),
+            y = seq(from = x1, to = x2, length.out = n) + w
+  )
+}
+
+dat <- sim.reg.data(1, 1, 10, 10, 300, 1)
+```
+And let us just plot that. Just have a quick look at what it looks like. And you can see it does, you know not surprisingly, those data more or less fall on a line here and we can see some dispersion around, you know, our imaginary line here.
+```{r}
+plot.data <- function(df){
+  require(ggplot2)
+  ggplot(df, aes(x, y)) + geom_point(size=2) + ggtitle("X vs Y")
+}
+plot.data(dat)
+```
+
+Let's create a model and plot that model and look at some metrics of that model. So this function, plot.reg does actually quite a bit. So the first thing we do is we compute a model and we use the R’s built in LM, or the linear model package, which is the basic linear regression.
+
+And using the R modelling language, we just say modelling y based on just one feature, one variable in this case, which is x. And the data – the argument data frame here.
+
+Now we need to add a column – actually two columns. So first one we are going to add is something called the df$score. And we use the predict method.  And this is lm.predict. And the only argument in this model object. 
+
+And then we are going to compute the residuals, because we want to look at those residuals. And that is just whatever the actual y value is minus that score. The difference there is the residual.
+
+And then we make two plots. So we plot – we are just going to make a plot of the points, the xy points. And then we are going to put a line on that, which is x versus the scored values. So that is going to be - we are going to do that as a line – that’s a regression line we computed. And then we are going to make a histogram of those residuals. 
+And we are going to plot using grid.arrange. We are just going to plot one over the other. So that we can compare them. And then we print some coefficients that we computed. Basically because It’s single function feature regression model, we only have an intercept and slope.  These are the only two parameters of this model. And so we will just print those. 
+
+And we will look at something like sum of squared errors and Adjusted R^2^ and we print those out. And we will give it a try.
+```{r warning=FALSE, message=FALSE}
+plot.reg <- function(df){
+  require(ggplot2)
+  require(gridExtra)
+  mod <- lm(y ~ x, data = df)
+  df$score <- predict(mod)
+  df$resids <- df$y - df$score
+  
+  p1 <- ggplot(df, aes(x, y)) + geom_point(size=2) + geom_line((aes(x, score, color="Red"))) +
+    ggtitle("X vs Y with Regression")
+  
+  p2 <- ggplot(df, aes(resids)) + geom_histogram() + ggtitle("Distribution of Residuals")
+  
+  grid.arrange(p1, p2, nrow=2)
+  
+  print(paste("Intercept = ", as.character(mod$coefficients[1])))
+  print(paste("Slope = ", as.character(mod$coefficients[2])))
+  
+  SSE <- sqrt(sum(df$resids * df$resids))
+  SSR <- sqrt(sum(df$y * df$y))
+  n = nrow(df)
+  adjR2 <- 1.0 - (SSE/SSR) * ((n-1)/(n-2))
+  print(paste("Adjusted R^2 = ", as.character(adjR2)))
+}
+plot.reg(dat)
+```
+
+So you can see a red regression line running here and it looks like it has done a pretty good job centering around the dispersion of those points. But this is admittedly not a very hard problem but that is how it looks like. And you can see the intercept – the intercept should be 0, 0 but you can see it is a little off -0.3. And the slope should be 1, but it is pretty darn close.
+
+And the Adjusted R^2 is reduction in standard deviation reduction variance is 84. We have explained 84% of the variance in this data, with this model. And here is our plot of residuals – it is a little bumpy but you know if you draw an imaginary line across the distribution, you see it is not too far from being normal which is what we should have given that we explicitly added normal distributed noise to this model. So that is really simple example of how you can build and evaluate a linear regression model using R.
+
+##Part 2
+
+We’ll now explore what happens as that noise or the standard deviation of those values around the regression line
+increase. I’ve just got this one extra function here that we’re going to run. It’s very simple, and I’ve defined a vector here which I call SD for standard deviation and we’re going to try three values – one, five, ten – and we’re just going to loop over that and we’re going to create the simulated data and we’re going to plot the regression model and look at the results.
+```{r message=FALSE}
+set.seed(1)
+demo.reg <- function(){
+  sd <- c(5, 10, 20)
+  for( i in 1:3){
+      regData <- sim.reg.data(0, 0, 10, 10, 50, sd[1])
+      plot.reg(regData)
+  }
+}
+demo.reg()
+```
+Look t what happens when we increase that standard deviation to 5. Well, notice that there’s quite a bit more dispersion. Our intercept now is 0.58, it should be 0 and our slope is now about 0.98 – again, it should be 1, and our R squared has dropped to 44 percent. So we’re not explaining a lot of variance in the model. You can also see some skew here’s zero, you can see some odd skew maybe in those residuals. 
+
+So let’s look at the last case where we had a standard deviation of 20. So that’s pretty severe, and you can see the intercept is 1.6, so that’s quite different from 0; the slope is 0.53.  But the R squared is now down to about 30 percent, so this is starting to look more like random data. We’re really not explaining a lot of the variance, and if we look at the histogram – boy that’s starting to look more like a uniform distribution than a normal distribution to me. 
+
+So there you can see, in practice in a simple simulation, what happens as your data becomes more uncertain – that is, as the variance or standard deviation of those data get larger and how that affects results from a regression model.
+
+##Part 3
+
+I would like to show you how outliers will simulate some outliers and how those affect linear regression models.  We are going to create a simulation and include an outlier. So the first argument of this function is the same we were simulating from before - an x1, y1, x2, y2 for the line, a number of data points and a standard deviation, and then ox or oy are the locations of an outlier. We are just going to add a single outlier to this data set. So, again, we simulate from a normal distribution some draws of noise and we create a data frame of x and y variables and we add either this x outlier or the y outlier plus the noise. 
+
+We will look at some different outliers. We are going to look one at 0 to 10, so that’s at x-y location, 0 to -10 so that is one below the line, and 5 to 10 so that is kind of middle of the whole data set. we put a small outlier. And we simply loop over those three possibilities and plot the results. 
+```{r message=FALSE}
+set.seed(4567)
+sim.reg.outlier <- function(x1, y1, x2, y2, n, sd, ox, oy){
+  w <- rnorm(n, mean=0, sd=sd)
+  df <- data.frame(
+            x = c(seq(from = x1, to = x2, length.out =n), ox),
+            y = c((seq(from = x1, to = x2, length.out = n) + w), oy)
+  )         
+   df[order(df$x),]
+}
+
+demo.outlier <- function(){
+  ox <- c(0, 0, 5)
+  oy <- c(10, -10, 10)
+  for(i in 1:3){
+    regData <- sim.reg.outlier(0, 0, 10, 10, 50, 1, ox[1], oy[1])
+    plot.reg(regData)
+  }
+}
+demo.outlier()
+```
+Recall the original plot:
+Intercept =  -0.286838750174328
+Slope =  1.05452129455141
+Adjusted R^2 =  0.840404077071864
+
+Look at the first plot above.  We have this one outlier x equals 0, y equals 10.  A couple of things. Remember our initial adjusted R^2 was about 0.84? So now it is down to 0.72 because of this one outlier which you can very clearly see in the histogram plot of the residuals. Our slope should be close to 1. Our intercept, which should be very close to 0, is now 0.92. So obviously this line has been pulled up by this outlier. So the slope is now reduced and the intercept is increased. You can imagine this outlier has a lot of leverage we talked. Since we had talked about leverage and is just pulling that line up.
+
+For the next plot we have an outlier down here at 0 and -10 for the Y. And now out intercept
+has been pulled to .72 instead of 0. And our slope is .89 instead of 1. So it’s had the opposite effect, the leverage of that one outlier has pulled the line down considerably. So the slope is now increased. 
+
+And finally we have that one outlier in the middle and here it is at 5 and 10.  And actually, you notice that it hasn’t had that big of an effect. Our slope is .88. Our intercept has been pulled up just a little bit to 0.87.  So the whole line has probably been pushed up a little bit. Just by a little bit. So the point is outliers in the middle don’t exert a lot of leverage. They just have this slight sort of pull on the whole line. But the outliers at the end really changed both the slope and the intercept because those were high leverage points.
