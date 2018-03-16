@@ -1,0 +1,313 @@
+---
+title: "Class Imbalance with Caret"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+---
+
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 12px;
+}
+body{ /* Normal  */
+   font-size: 12px;
+}
+td {  /* Table  */
+   font-size: 10px;
+}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;
+}
+h2 { /* Header 2 */
+ font-size: 22px;
+}
+h3 { /* Header 3 */
+ font-size: 18px;
+}
+code.r{ /* Code block */
+  font-size: 10px;
+}
+pre { /* Code block */
+  font-size: 10px
+}
+#table-of-contents h2 {
+background-color: #4294ce;
+}
+#table-of-contents{
+background: #688FAD;
+}
+#nav-top span.glyphicon{
+color: #4294ce;
+}
+#postamble{
+background: #4294ce;
+border-top: ;
+}
+</style>
+---
+
+```{r loadLibs1, warning=FALSE, message=FALSE, echo=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr", "dplyr", "xda", "ggplot2", "readr", "gridExtra", "caret", "PRROC", prompt = FALSE)
+```
+
+# Introduction
+
+When faced with classification tasks in the real world, it can be challenging to deal with an outcome where one class heavily outweighs the other (a.k.a., imbalanced classes). Below are some techniques that can help to improve prediction performance in the case of imbalanced classes using R and `caret`. 
+
+# Evaluation Metrics for Classifiers
+
+After building a classifier, you need to decide how to tell if it is doing a good job or not. Many evaluation metrics for classifiers exist and can generally be divided into two main groups:
+
+- **Threshold-dependent**: This includes metrics like accuracy, precision, recall, and F1 score, which all require a confusion matrix to be calculated using a hard cutoff on predicted probabilities. These metrics are typically quite poor in the case of imbalanced classes, as statistical software inappropriately uses a default threshold of 0.50 resulting in the model predicting that all observations belong in the majority class.
+- **Threshold-invariant**: This includes metrics like area under the ROC curve (AUC), which quantifies true positive rate as a function of false positive rate for a variety of classification thresholds. Another way to interpret this metric is the probability that a random positive instance will have a higher estimated probability than a random negative instance.
+
+# Methods to Improve Performance on Imbalanced Data
+
+A few of the more popular techniques to deal with class imbalance will be covered below, but the following list is nowhere near exhaustive. 
+
+- **Class weights**: impose a heavier cost when errors are made in the minority class
+- **Down-sampling**: randomly remove instances in the majority class
+- **Up-sampling**: randomly replicate instances in the minority class
+- **Synthetic minority sampling technique (SMOTE)**: down samples the majority class and synthesizes new minority instances by interpolating between existing ones
+
+It is important to note that these weighting and sampling techniques have the biggest impact on threshold-dependent metrics like accuracy because they artificially move the threshold to be closer to what might be considered as the “optimal” location on a ROC curve. Threshold-invariant metrics can still be improved using these methods, but the effect will not be as pronounced.
+
+# Simulation set-up
+
+To simulate class imbalance, the `twoClassSim` function from `caret` is used. Simulate a separate training set and test set each with 5000 observations. Additionally, include 20 meaningful variables and 10 noise variables. The `intercept` argument controls the overall level of class imbalance and has been selected to yield a class imbalance of around 50:1.
+
+```{r message=FALSE, warning=FALSE}
+library(DMwR) # for smote implementation
+library(purrr) # for functional programming (map)
+library(pROC) # for AUC calculations
+
+set.seed(2969)
+
+imbal_train <- twoClassSim(5000, intercept = -25, linearVars = 20, noiseVars = 10)
+
+imbal_test  <- twoClassSim(5000, intercept = -25, linearVars = 20, noiseVars = 10)
+  
+prop.table(table(imbal_train$Class))
+```
+
+# Testing & Evaluation
+
+To model these data, a gradient boosting machine (gbm) is used as it can easily handle potential interactions and non-linearities that have been simulated above. Model hyperparameters are tuned using repeated cross-validation on the training set, repeating five times with ten folds used in each repeat. The AUC is used to evaluate the classifier to avoid having to make decisions about the classification threshold. Note that this code takes a little while to run due to the repeated cross-validation, so reduce the number of repeats to speed things up and/or use the `verboseIter = TRUE` argument in `trainControl` to keep track of the progress.
+
+```{r}
+ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 5, summaryFunction = twoClassSummary, classProbs = TRUE)
+
+# Build a standard classifier using a gradient boosted machine
+orig_fit <- train(Class ~ ., data = imbal_train, method = "gbm", verbose = FALSE, metric = "ROC", trControl = ctrl)
+
+# Build custom AUC function to extract AUC from the caret model object
+test_roc <- function(model, data) {
+    roc(data$Class, predict(model, data, type = "prob")[, "Class2"])}
+
+orig_fit %>% test_roc(data = imbal_test) %>% auc()
+```
+
+The final model yields an AUC of 0.95 which is quite good. Can we improve it using the techniques outlined above?
+
+## Handling class imbalance with weighted or sampling methods
+
+Both weighting and sampling methods are easy to employ in `caret`. Incorporating weights into the model can be handled by using the `weights` argument in the `train` function (assuming the [model can handle weights in caret](https://topepo.github.io/caret/train-models-by-tag.html#Accepts_Case_Weights)), while the sampling methods mentioned above can be implemented using the `sampling` argument in the `trainControl` function. Note that the same seeds were used for each model to ensure that results from the same cross-validation folds are being used.
+
+Recall for sampling methods it is vital that you only sample the training set and not the test set. This means when doing cross-validation, the sampling step must be done inside of the cross-validation procedure. Using the sampling argument in `trainControl` implements sampling correctly in the cross-validation procedure.
+
+```{r}
+# Create model weights (they sum to one)
+model_weights <- ifelse(imbal_train$Class == "Class1",
+                        (1/table(imbal_train$Class)[1]) * 0.5,
+                        (1/table(imbal_train$Class)[2]) * 0.5)
+
+# Use the same seed to ensure same cross-validation splits
+ctrl$seeds <- orig_fit$control$seeds
+
+# Build weighted model
+weighted_fit <- train(Class ~ ., data = imbal_train, method = "gbm", verbose = FALSE, weights = model_weights,
+                      metric = "ROC", trControl = ctrl)
+
+# Build down-sampled model
+ctrl$sampling <- "down"
+
+down_fit <- train(Class ~ ., data = imbal_train, method = "gbm", verbose = FALSE, metric = "ROC", trControl = ctrl)
+
+# Build up-sampled model
+ctrl$sampling <- "up"
+
+up_fit <- train(Class ~ ., data = imbal_train, method = "gbm", verbose = FALSE, metric = "ROC", trControl = ctrl)
+
+# Build smote model
+ctrl$sampling <- "smote"
+
+smote_fit <- train(Class ~ ., data = imbal_train, method = "gbm", verbose = FALSE, metric = "ROC", trControl = ctrl)
+```
+
+Examining the AUC calculated on the test set shows a clear distinction between the original model implementation and those that incorporated either a weighting or sampling technique. The weighted method possessed the highest AUC value, followed by the sampling methods, with the original model implementation performing the worst.
+
+# Examine results for test set
+```{r}
+model_list <- list(original = orig_fit, weighted = weighted_fit, down = down_fit, up = up_fit, SMOTE = smote_fit)
+
+model_list_roc <- model_list %>% map(test_roc, data = imbal_test)
+
+model_list_roc %>% map(auc)
+```
+
+We can examine the actual ROC curve to get a better idea of where the weighted and sampling models are outperforming the original model at a variety of classification thresholds. The weighted model seems to dominate the others throughout while the original model lags between a false positive rate between 0% and 25%. This indicates that the other models have better early retrieval numbers. That is, the algorithm better identifies the true positives as a function of false positives for instances that are predicted as having a high probability of being in the minority class.
+
+```{r}
+results_list_roc <- list(NA)
+num_mod <- 1
+
+for(the_roc in model_list_roc){
+ 
+  results_list_roc[[num_mod]] <- 
+    data_frame(tpr = the_roc$sensitivities,
+               fpr = 1 - the_roc$specificities,
+               model = names(model_list)[num_mod])
+  num_mod <- num_mod + 1
+}
+
+results_df_roc <- bind_rows(results_list_roc)
+
+# Plot ROC curve for all 5 models
+custom_col <- c("#000000", "#009E73", "#0072B2", "#D55E00", "#CC79A7")
+
+ggplot(aes(x = fpr,  y = tpr, group = model), data = results_df_roc) + geom_line(aes(color = model), size = 1) +
+  scale_color_manual(values = custom_col) + geom_abline(intercept = 0, slope = 1, color = "gray", size = 1) +
+  theme_bw(base_size = 18)
+```
+
+## Initial Conclusion
+
+In the above post, I outline some steps to help improve classification performance when you have imbalanced classes. Although weighting outperformed the sampling techniques in this simulation, this may not always be the case. Because of this, it is important to compare different techniques to see which works best for your data. In many cases, there is no huge benefit in using either weighting or sampling techniques when classes are moderately imbalanced (i.e., no worse than 10:1) in conjunction with a threshold-invariant metric like the AUC. 
+
+# Additional Considerations
+
+There are some issues to keep in mind when using the AUC in the case of imbalanced classes.  Also, there is another metric that is useful to examine: area under the precision-recall curve - **AUPRC**.
+
+## Issues Using ROC for Imbalanced Classes
+
+### Consideration 1:
+
+While using the AUC as an evaluation metric for classifiers on data with imbalanced classes is a popular choice, it can be a misleading one if you are not careful. Take the following example. 
+
+Below we see the model performance for two classifiers on an imbalanced dataset, with the ROC curve on the left and the precision-recall curve on the right. In the left example, the AUC for Curve 1 is reported in the paper as 0.813 and the AUC for Curve 2 is 0.875. So blindly choosing the best AUC value will choose Model 2 as the best. However, the precision-recall curve on the right tells a much different story. Here the area under Curve 1 is 0.513 and for Curve 2 it is 0.038. Due to Curve 1 having much better early retrieval compared to Curve 2, we see this massive discrepancy in the precision and recall performance between the two classifiers.
+
+![](./figures/classImbalance1.JPG)
+
+> On imbalanced data, the classifier with better early retrieval has better precision for lower values of recall.
+
+Therefore, it is recommended to examine the precision-recall curve as it is more explicitly informative than a ROC curve in the case of imbalanced classes. Calculate the area under the precision-recall curve for the 5 classifiers using the `PRROC` package in R to create a custom function, `calc_auprc`. tTere is better performance for the weighted model, followed by the sampled models, with the original model coming in last. However, now the difference in performance is much more apparent.
+
+```{r AUPRC}
+calc_auprc <- function(model, data){
+  
+  index_class2 <- data$Class == "Class2"
+  index_class1 <- data$Class == "Class1"
+  
+  predictions <- predict(model, data, type = "prob")
+  
+  pr.curve(predictions$Class2[index_class2], predictions$Class2[index_class1], curve = TRUE)##pr.curve is in PRROC
+}
+
+# Get results for all 5 models
+
+model_list_pr <- model_list %>% map(calc_auprc, data = imbal_test)
+
+model_list_pr %>% map(function(the_mod) the_mod$auc.integral)
+```
+
+Dig deeper into these results by plotting the precision-recall curves. Below, both up sampling and weighting offer the best precision and recall performance depending on the threshold that is chosen, while the original classifier is essentially the worst performing across all thresholds. 
+
+For example, the weighted classifier simultaneously has a recall of 75% and a precision of 50%, resulting in an F1 score of 0.6, while the original classifier has a recall of 75% and a precision of 25%, resulting in an F1 score of 0.38. In other words, when both classifiers create their predictions and use a particular threshold to obtain hard classifications, they both correctly identify 75% of the cases that are actually in the minority class. However, the weighted classifier is more efficient in these predictions, in that 50% of the observations predicted to be in the minority class actually are, while for the original classifier, only 25% of the observations predicted to be in the minority class actually are.
+
+```{r}
+# Plot the AUPRC curve for all 5 models
+
+results_list_pr <- list(NA)
+num_mod <- 1
+
+for(the_pr in model_list_pr){
+  
+  results_list_pr[[num_mod]] <- data_frame(recall = the_pr$curve[, 1],
+                                           precision = the_pr$curve[, 2],
+                                           model = names(model_list_pr)[num_mod])
+  num_mod <- num_mod + 1
+}
+
+results_df_pr <- bind_rows(results_list_pr)
+custom_col <- c("#000000", "#009E73", "#0072B2", "#D55E00", "#CC79A7")
+
+ggplot(aes(x = recall, y = precision, group = model), data = results_df_pr) +
+  geom_line(aes(color = model), size = 1) + scale_color_manual(values = custom_col) +
+  geom_abline(intercept = sum(imbal_test$Class == "Class2")/nrow(imbal_test), slope = 0, color = "gray", size = 1) +
+  theme_bw()
+```
+
+## Implementing AUPRC in caret
+
+One might imagine wanting to choose hyperparameters of a classifier by using the area under the precision-recall curve rather than the AUC, as some combinations of hyperparameters for a given model might have better early retrieval performance compared to others. It is easy to create a custom summary function in `caret` to allow you to do this by combining the code for the `calc_auprc` function.
+
+The custom summary function is implemented below, along with code to re-run the original model now using area under the precision-recall curve as the evaluation metric. The original model implementation has the exact same results on the test set for the area under the PR curve, regardless of whether we build the model using the area under the ROC curve or the area under the precision-recall curve. This is because both select the same combination of hyperparameters to build the final model on. Note that this may not always be the case, especially if you decide to use the 1-SE rule when choosing the hyperparameters in order to encourage a more parsimonious solution.
+
+```{r}
+set.seed(5627)
+auprcSummary <- function(data, lev = NULL, model = NULL){
+  
+  index_class2 <- data$obs == "Class2"
+  index_class1 <- data$obs == "Class1"
+  
+  the_curve <- pr.curve(data$Class2[index_class2], data$Class2[index_class1], curve = FALSE)
+  out <- the_curve$auc.integral
+  names(out) <- "AUPRC"
+  
+  out}
+
+# Re-initialize control function to remove smote and
+# include our new summary function
+
+ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 5,
+                     summaryFunction = auprcSummary, classProbs = TRUE,
+                     seeds = orig_fit$control$seeds)
+
+orig_pr <- train(Class ~ ., data = imbal_train, method = "gbm", verbose = FALSE,
+                 metric = "AUPRC", trControl = ctrl)
+```
+
+```{r}
+# Get results for auprc on the test set
+orig_fit_test <- orig_fit %>% calc_auprc(data = imbal_test) %>% (function(the_mod) the_mod$auc.integral)
+
+orig_pr_test <- orig_pr %>% calc_auprc(data = imbal_test) %>% (function(the_mod) the_mod$auc.integral)
+```
+
+```{r}
+# The test errors are the same - should be TRUE
+identical(orig_fit_test, orig_pr_test)
+```
+
+```{r}
+# Because both chose the same hyperparameter combination
+# Should be true!
+identical(orig_fit$bestTune, orig_pr$bestTune)
+```
+
+# Conclusion
+
+The **A**rea **U**nder the **P**recision-**R**ecall **C**urve can be a useful metric to help differentiate between two competing models in the case of imbalanced classes. For the AUC, weights and sampling techniques may only provide modest improvements. However, this improvement typically impacts early retrieval performance, resulting in a much larger gain in the overall precision of a model. In conjunction with trying weighting or sampling, it is also recommended to avoid relying solely on the AUC when evaluating the performance of a classifier that has imbalanced classes as it can be a misleading metric. The code above shows how easy it is to use the precision-recall curve, a more sensitive measure of classification performance when there are imbalanced classes.
+
+# POst Follow-up
+
+Are [blog](http://www.win-vector.com/blog/2015/02/does-balancing-classes-improve-classifier-performance/) provides some additional insights:
+
+- Balancing class prevalence before training a classifier does not across-the-board improve classifier performance.
+- In fact, it is contraindicated for logistic regression models.
+- Balancing classes or enriching target class prevalence may improve random forest classifiers.
+- But random forest models may not be the best choice for very unbalanced classes.
+- If target class enrichment is necessary (perhaps because of data scarcity issues), SVM may be the safest choice for modeling.
