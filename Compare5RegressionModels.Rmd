@@ -165,8 +165,14 @@ text_wrap <- function(x, labs, digits, varlen, faclen) {
 ```
 
 ```{r fig.align='center', fig.height=20, fig.width=9, warning=FALSE}
-prp(
-  temp, extra = 101, box.palette = "#f9f5f1", type = 4, cex = 0.7, yspace = 4, nn = TRUE, nn.cex = 1.4,
+prp(temp, extra = 101, box.palette = "#f9f5f1", type = 4, cex = 0.7, yspace = 4, nn = TRUE, nn.cex = 1.4,
+  nn.box.col = "#CFB292", space = 2, split.font = 0.9, branch.lty = 2, faclen = 2, split.fun = text_wrap,
+  main = "Which variables matter?")
+```
+
+```{r replacePRP, fig.align='center', fig.height=20, fig.width=9, warning=FALSE, eval=FALSE, echo=FALSE}
+#academic exercise only b/c prp (above) is the older function
+rpart.plot(temp, extra = 101, box.palette = "#f9f5f1", type = 4, cex = 0.7, yspace = 4, nn = TRUE, nn.cex = 1.4,
   nn.box.col = "#CFB292", space = 2, split.font = 0.9, branch.lty = 2, faclen = 2, split.fun = text_wrap,
   main = "Which variables matter?")
 ```
@@ -227,9 +233,7 @@ compare
 Returning to the significance of month, we see that the glm p-values are close to zero. This confirms it does make sense to include this variable in our models.
 
 ```{r}
-tidy(model_GLM$finalModel) %>% 
-  filter(str_detect(term, "month")) %>% 
-  select(term, p.value)
+tidy(model_GLM$finalModel) %>% filter(str_detect(term, "month")) %>% select(term, p.value)
 ```
 
 Plotting the residuals of the GLM model, we do see an increasing spread as the count rises.
@@ -246,7 +250,7 @@ gather_residuals(crime_df, model_GLM, .resid = "resid", .model = "model") %>%
 
 ## Recursive Partitioning
 
-Although we built a recursive partitioning model earlier to select the modelling variables, we’ll run it again here inside the caret package’s train function. We’ll do that primarily to tune / refine the model, and partly to create consistent outputs across our five models. Consistency, for example, will enable us to pluck some of the information out of the final models to annotate the concluding plot.
+Although we built a recursive partitioning model earlier to select the modeling variables, run it again here inside the `caret train` function. This tunes / refines the model and creates consistent outputs across the five models. Consistency, for example, will enable us to pluck some of the information out of the final models to annotate the concluding plot.
 
 ```{r eval=FALSE}
 tune_grid <-
@@ -259,7 +263,7 @@ model_RP <- train(count ~ ., # tried: interaction (negligible benefit)
 
 ## Random Forest
 
-Random Forest broadly combines a large number of decision trees, by deploying a bagging procedure to repeatedly split the training data horizontally, and a further procedure to randomly sample the predictors vertically.
+Random Forest combines a large number of decision trees by deploying a bagging procedure to repeatedly split the training data horizontally and another procedure to randomly sample the predictors vertically.
 
 ```{r eval=FALSE}
 tune_grid <- expand.grid(mtry = 18, # 54 variables divided by 3 (allowing for dummy variables)
@@ -275,7 +279,7 @@ model_RF2 <- train(count ~ ., data = crime_df, method = "ranger", num.trees = 50
                    respect.unordered.factors = TRUE, tuneGrid = tune_grid, trControl = train_control)
 ```
 
-At first blush, we might be tempted to model with an mtry of 2 given the four variables of borough, major category, year and month. However, our categorical variables will actually generate 54 dummy variable, so an mtry of 54 / 3 = 18 would be more appropriate. We can see the impact of this choice below.
+At first, we might be tempted to model with an mtry of 2 given the four variables of borough, major category, year and month. However, our categorical variables will actually generate 54 dummy variables, so an mtry of 54 / 3 = 18 would be more appropriate. We can see the impact of this choice below.
 
 ```{r}
 crime_df %>% 
@@ -336,9 +340,10 @@ combined_pred <- crime_df %>% spread_predictions("Generalized Linear Model" = mo
                                                  "Cubist" = model_Cub) %>% 
   gather(key = model, value = pred,-year,-month,-borough,-maj_cat,-count) %>% rename(act = count)
 
-pred_meas <- map_df(list(model_GLM, model_RF, model_SGB, model_RP, model_Cub), function(x) {
-  tibble(model = x$modelInfo$label, method = x$method, model_type = x$modelType, rmse = rmse(x, crime_df), rsquare = rsquare(x, crime_df))
-})
+pred_meas <- map_df(list(model_GLM, model_RF, model_SGB, model_RP, model_Cub), 
+                    function(x) {tibble(model = x$modelInfo$label, method = x$method, 
+                                        model_type = x$modelType, rmse = rmse(x, crime_df), 
+                                        rsquare = rsquare(x, crime_df))})
 ```
 
 # Compare Performance
@@ -349,12 +354,12 @@ Finally, we will compare the performance of the five models, both visually and q
 ggplot(combined_pred, aes(pred, act, colour = maj_cat)) + geom_point(alpha = 0.3, size = 2) +
      geom_abline(colour = "black", lty = 2) + facet_wrap(~ model, nrow = 1) +
      geom_text(x = 1900, y = 250, aes(label = paste0("Method = ", subset(method, model %in% combined_pred$model),
-                                                     "\n", "Type = ", subset(model_type, model %in% combined_pred$model),
-                                                     "\n", "RMSE = ", round(subset(rmse, model %in% combined_pred$model), 3),
-                                                     "\n", "R squared = ", round(subset(rsquare, model %in% combined_pred$model), 3))),
+                                 "\n", "Type = ", subset(model_type, model %in% combined_pred$model),
+                                 "\n", "RMSE = ", round(subset(rmse, model %in% combined_pred$model), 3),
+                                 "\n", "R squared = ", round(subset(rsquare, model %in% combined_pred$model), 3))),
                data = pred_meas, color = "black", size = 3) +
-     scale_colour_economist(name = "Major Category") + scale_y_continuous(breaks = seq(500, 3000, by = 500),
-                                                                          limits = c(0, 3000)) +
+     scale_colour_economist(name = "Major Category") + 
+     scale_y_continuous(breaks = seq(500, 3000, by = 500), limits = c(0, 3000)) +
      scale_x_continuous(breaks = seq(500, 3000, by = 500), limits = c(0, 3000)) +
      ggtitle("Comparison of 5 Regression Models", subtitle = "Crime by category for each of London's 32 boroughs") +
      labs(x = "Predictions", y = "Actual") + guides(colour = guide_legend(override.aes = list(size = 3))) + theme_thinkr + cap

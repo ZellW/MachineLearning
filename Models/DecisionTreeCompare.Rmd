@@ -52,9 +52,11 @@ border-top: ;
 if(!require(easypackages)){install.packages("easypackages")}
 library(easypackages)
 packages("plyr","dplyr","ggplot2", "readr", "tidyr", "gridExtra", "stringr", "lubridate", 
-        "caret",  prompt = TRUE)
+        "caret", "gbm", prompt = TRUE)
 
 options(scipen = 999)#Do not display exponents
+
+load("~/GitHub/LargeDataFiles/TreeAlgoCompare.RData")
 ```
 
 # Introduction
@@ -63,8 +65,8 @@ options(scipen = 999)#Do not display exponents
 
 The UCI Bike dataset is availabe from a variety of sources.  A copy of the data has been donwloaded to the local machine.  A CSV has also been saved for reproducibility.
 
-```{r getData}
-Bike <- read.csv("C:/Users/cweaver/Downloads/Bike Rental UCI dataset.csv")
+```{r getData, eval=FALSE}
+Bike <- read.csv("~/GitHub/MachineLearning/Models/data/Bike Rental UCI dataset.csv")
 ```
 
 ## Step 2: Data pre-processing
@@ -73,7 +75,7 @@ Data pre-processing is an important step in most real-world analytical applicati
 
 In this experiment, we used Metadata Editor and Project Columns to convert the two numeric columns "weathersit" and "season" into categorical variables and to remove four less relevant columns ("instant", "dteday", "casual", "registered").
 
-```{r dataPreProcess}
+```{r dataPreProcess, eval=FALSE}
 Bike$weathersit <- as.factor(Bike$weathersit)
 Bike$season <- as.factor(Bike$season)
 
@@ -96,16 +98,16 @@ It can be tempting to includes many raw data fields in the feature set, but more
 
 In this experiment, the origial data is augemented with a number of new columns.  3 new datasets are created with new features following the concepts detailed above.
 
-```{r commonVars}
+```{r commonVars, eval=FALSE}
 previous_hrs <- 12
 orig_names <- names(Bike)
 n_rows <- dim(Bike)[1]
 orig_colCnt <- dim(Bike)[2] #number of col in original data after cleaning
-suffix <- -1:-previous_hrs #to create new colums
+suffix <- -1:-previous_hrs #to create new columns
 ```
 
 ### Bike Demand for Last 12 Hours
-```{r}
+```{r eval=FALSE}
 Bike1 <- Bike
 
 for (i in 1:previous_hrs) {
@@ -123,7 +125,7 @@ names(Bike1) <- c(orig_names, new_names_hour)
 
 Add more columns.
 
-```{r}
+```{r eval=FALSE}
 Bike2 <- Bike1
 orig_colCnt2 <- orig_colCnt + previous_hrs
 for (i in 1:previous_hrs) {
@@ -138,7 +140,7 @@ names(Bike2) <- c(orig_names, new_names_hour, new_names_day)
 ### Bike demand in the last 12 weeks: same day and same hour
 
 Add more colums to
-```{r}
+```{r eval=FALSE}
 Bike3 <- Bike2
 orig_colCnt2 <- orig_colCnt + previous_hrs * 2
 for (i in 1:previous_hrs) {
@@ -178,11 +180,12 @@ trainData3 <- Bike3 %>% filter(yr == 0) %>% mutate(yr = NULL)
 testData3 <- Bike3 %>% filter(yr ==1) %>% mutate(yr = NULL)
 ```
 
-```{r simpleDecisionTree}
+```{r simpleDecisionTree, eval=FALSE}
 simple_tree <- rpart::rpart(cnt~., data = Bike, method = "anova", cp = 0.03)
+```
+```{r}
 rpart.plot::rpart.plot(simple_tree)
 ```
-
 
 ```{r eval=FALSE}
 set.seed <- 12347
@@ -207,12 +210,8 @@ resamps <- resamples(list(singleTree=rpart_tree, randomForest=rf_tree))
 summary(resamps)
 ```
 
-```{r eval=FALSE, echo=FALSE}
-setwd("~/Github/Valorem/SalesCollaterals")
-save.image("DemandForecast.RData")
-```
-
 ```{r GBM_model, eval=FALSE}
+set.seed <- 12347
 gbm_tree <- train(cnt~., data = Bike1, method = "gbm", trControl = trainctrl, 
                   distribution = "gaussian")
 gbm_tree
@@ -228,6 +227,7 @@ getModelInfo()$gbm$parameters
 ```
 
 ```{r GBM_model, eval=FALSE}
+set.seed <- 12347
 myGrid <- expand.grid(n.trees = c(150, 175, 200, 250),
                       interaction.depth = c(5, 6, 7, 8, 9),
                       shrinkage = c(0.075, 0.1, 0.125, 0.15, 0.2),
@@ -238,21 +238,16 @@ gbm_tree2 <- train(cnt~., data = Bike1, method = "gbm", trControl = trainctrl,
 gbm_tree2
 ```
 
-```{r saveGBM, echo=FALSE, eval=FALSE}
-setwd("~/Github/Valorem/SalesCollaterals")
-save.image("DemandForecast.RData")
-```
-
 ```{r}
 gbm_tree2$bestTune
 ```
 
-```{r}
+```{r eval=FALSE}
+set.seed <- 12347
 myGrid2 <- gbm_tree2$bestTune
 gbm_tree2 <- train(cnt~., data = Bike1, method = "gbm", trControl = trainctrl, 
                   distribution = "gaussian", tuneGrid = myGrid2)
 ```
-
 
 ```{r}
 resamps <- resamples(list(singleTree=rpart_tree, randomForest=rf_tree, GBM = gbm_tree, 
@@ -269,17 +264,22 @@ bwplot(resamps, metric = "RMSE", main = "Model Compare")
 
 ```{r}
 plot(varImp(gbm_tree2, scale = TRUE))
-
 ```
 
+```{r newVisual}
+gather_residuals(Bike1, gbm_tree2, .resid = "resid", .model = "model") %>%
+  ggplot(aes(cnt, resid, color = holiday)) + geom_point() 
 
-```{r saveGBM, echo=FALSE, eval=FALSE}
-setwd("~/Github/Valorem/SalesCollaterals")
-save.image("DemandForecast.RData")
++
+  ggtitle("GLM residuals spread out at higher counts") +
+  geom_hline(yintercept = 20, lty = 2, size = 1) +
+  geom_abline(intercept = 80, slope = 0.15, colour = "grey80", size = 2, lty = 3) +
+  geom_abline(intercept = -80, slope = -0.17, colour = "grey80", size = 2, lty = 3) +
+  scale_colour_economist() + theme_thinkr + cap
 ```
 
 ```{r}
-set.seed = 12345
+set.seed <- 12347
 
 library(xgboost)
 library(Matrix)
@@ -333,6 +333,7 @@ myErrors[myErrors$test_rmse == min(myErrors$test_rmse),]
 ```
 
 ```{r}
+set.seed <- 12347
 best_model <- xgb.train(params = xgb_params, data = myTrain_matrix, nrounds = 100,
                         watchlist = watchlist,
                         eta = 0.08)
@@ -359,6 +360,7 @@ head(myCompare, 20)
 ```
 
 ```{r XGB_MoreParams}
+set.seed <- 12347
 #http://xgboost.readthedocs.io/en/latest/parameter.html
 best_model <- xgb.train(params = xgb_params, data = myTrain_matrix, nrounds = 300,
                         watchlist = watchlist,
@@ -372,6 +374,10 @@ best_model <- xgb.train(params = xgb_params, data = myTrain_matrix, nrounds = 30
 myErrors <- data.frame(best_model$evaluation_log)
 {plot(myErrors$iter, myErrors$train_rmse, col = "blue")
 lines(myErrors$iter, myErrors$test_rmse, col = "red")}
+```
+
+```{r saveGBM, echo=FALSE, eval=FALSE}
+save.image("~/GitHub/LargeDataFiles/TreeAlgoCompare.RData")
 ```
 
 - `tree.depth`; default = 6; 1 to INF
@@ -389,3 +395,26 @@ head(myCompare, 20)
 
 - RF uses decision trees, which are very prone to overfitting. In order to achieve higher accuracy, RF decides to create a large number of them based on bagging. The basic idea is to resample the data over and over and for each sample train a new classifier. Different classifiers overfit the data in a different way, and through voting those differences are averaged out.
 - GBM is a boosting method, which builds on weak classifiers. The idea is to add a classifier at a time, so that the next classifier is trained to improve the already trained ensemble. Notice that for RF each iteration the classifier is trained independently from the rest.
+
+```{r lightGBMinstall, eval=FALSE}
+#Install CMAKE (https://cmake.org/download/) and RTools 64 bit required first!
+# library(devtools)
+# options(devtools.install.args = "--no-multiarch") # if you have 64-bit R only, you can skip this
+# install_github("Microsoft/LightGBM", subdir = "R-package")
+
+devtools::install_github("Microsoft/LightGBM", ref = "1b7643b", subdir = "R-package")#not certain why this works!
+#See https://github.com/Microsoft/LightGBM/pull/177
+
+#lightGBM parameters:  https://sites.google.com/view/lauraepp/parameters
+```
+
+```{r}
+library(lightgbm)
+train_lgbm <- select(myTrain, -cnt) %>% as.matrix()
+trainLable_lgbm <- select(myTrain, cnt) %>% as.matrix()
+
+train_lgbm <- lgb.Dataset(train_lgbm, label = trainLable_lgbm)
+params_lgbm <- list(objective="regression", metric="l2")
+model_lgbm <- lgb.train(params_lgbm, train_lgbm, min_data=1, learning_rate=.5)
+```
+
