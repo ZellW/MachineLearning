@@ -1,0 +1,246 @@
+---
+title: 'NLP Using Udpipe'
+output:
+    rmdformats::readthedown:
+      highlight: pygments
+      code_folding: show
+---
+
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;
+}
+body{ /* Normal  */
+   font-size: 14px;
+}
+td {  /* Table  */
+   font-size: 12px;
+}
+h1 { /* Header 1 */
+font-size: 26px;
+color: #4294ce;
+}
+h2 { /* Header 2 */
+font-size: 22px;
+}
+h3 { /* Header 3 */
+font-size: 18px;
+}
+code.r{ /* Code block */
+  font-size: 12px;
+}
+pre { /* Code block */
+  font-size: 12px
+}
+#table-of-contents h2 {
+background-color: #4294ce;
+}
+#table-of-contents{
+background: #688FAD;
+}
+#nav-top span.glyphicon{
+color: #4294ce;
+}
+#postamble{
+background: #4294ce;
+border-top: ;
+}
+</style>
+
+```{r loadLibs1, warning=FALSE, message=FALSE, echo=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr", "dplyr", "ggplot2", "readr", "tidyr", "gridExtra", "readxl", "stringr", 
+         "lubridate", "udpipe", prompt = FALSE)
+
+options(scipen = 999)#Do not display exponents
+```
+
+# Introduction
+
+What tools would someone want to develop to prepare to evaluate a corpus of questions to determine if the questions are *good ones*.  *Good ones* are ultimately determined by the students that rate them.  In the absence of no ratings, dream how the questions could be analyzed so an unsupervised model may predict a *good* question and a *bad* question.
+
+Below, a new R tool is introduced.  It appears it might be a way to spend the discovery of *good/bad* questions.  This is just a tool.  The development of an algorithmic solution would likely be built using more traditional NLP tools.
+
+`UDPipe` provides language-agnostic tokenization, tagging, lemmatization and dependency parsing of raw text, which is an essential part in natural language processing.  `udpipe` supports a wide range of languages (50+) from Latin-based to Asian, including Slavonic, Russian, Vietnamese, Finnish, Turkish, Serbian, Japanese, Basque, and Greek.
+
+A traditional natural language processing flow consists of a number of building blocks which can be used to structure your Natural Language Application on top of it. 
+
+1. tokenization
+2. parts of speech tagging
+3. lemmatization
+4. morphological feature tagging
+5. syntactic dependency parsing
+6. entity recognition
+7. extracting word & sentence meaning
+
+See [Appendix][] for a comparison to `spaCy`.  `spacyr` is another R package around the popular `spaCy` NLP toolkit: https://github.com/explosion/spaCy.
+
+# Example Data
+
+This includes the entire corpus of articles published by the ABC website in the given time range. With a volume of 200 articles per day and a good focus on international news, we can be fairly certain that every event of significance has been captured here. This dataset can be downloaded from [Kaggle Datasets](https://www.kaggle.com/therohk/million-headlines).
+
+```{r loadDataFile, echo=FALSE, eval=T, message=FALSE}
+rm(list= ls())
+setwd("~/GitHub/MachineLearning/Models/NLP_TestMining")
+
+news <- read_csv(file = "./data/abcnews-date-text.csv", col_names = TRUE, progress = FALSE)
+news <- news %>% mutate(year = str_sub(publish_date,1,4), month = str_sub(publish_date,5,6),
+                        date = str_sub(publish_date,7,8))
+glimpse(news)
+
+```
+
+`udpipe` provides pretrained language models for languages.  Download the required model using `udpipe_download_model`.
+
+```{r}
+model <- udpipe_download_model(language = "english", model_dir = "./data/")
+udmodel_english <- udpipe_load_model(file = "./data/english-ud-2.0-170801.udpipe")
+```
+
+## Explore the Data
+
+### Number of Articles by Date
+
+```{r}
+news %>% group_by(publish_date) %>% count() %>% arrange(desc(n))
+```
+
+```{r}
+news %>% group_by(publish_date) %>% count() %>% ggplot() + 
+     geom_line(aes(publish_date, n, group = 1))
+```
+
+### Distribution by Year
+
+```{r}
+news %>% group_by(year) %>% count() %>% ggplot() + geom_bar(aes(year,n), stat ='identity')
+```
+
+Filter articles for 2017.
+
+```{r}
+news2017 <- news %>% filter(year == 2017)
+```
+
+#  Using udpipe
+
+## Annotate Input Test Data
+
+`udpipe_annotate` takes the language model and annotates the given text data.
+
+```{r}
+s <- udpipe_annotate(udmodel_english, news2017$headline_text)
+x <- data.frame(s)
+```
+
+## Parts of Speech
+
+```{r}
+library(lattice)
+stats <- txt_freq(x$upos, order = TRUE)
+stats$key <- factor(stats$key, levels = (stats$key))
+barchart(key ~ freq, data = stats, col = "yellow", 
+         main = "Universal Parts of Speech\n frequency of occurrence", 
+         xlab = "Freq")
+```
+
+## Most Frequent Nouns
+
+```{r}
+stats <- x %>% filter(upos == "NOUN")
+
+stats <- txt_freq(stats$token, order = TRUE)
+stats$key <- factor(stats$key, levels = stats$key)
+barchart(key ~ freq, data = head(stats, 20), col = "cadetblue", 
+         main = "Most Frequent Nouns", xlab = "Freq")
+```
+
+## Most Frequent Adjectives
+
+```{r}
+stats <- x %>% filter(upos == "ADJ")
+stats <- txt_freq(stats$token, order = TRUE)
+stats$key <- factor(stats$key, levels = (stats$key))
+barchart(key ~ freq, data = head(stats, 20), col = "purple", 
+         main = "Most occurring adjectives", xlab = "Freq")
+```
+
+## Most Frequent Verbs
+
+```{r}
+stats <- x %>% filter(upos =="VERB")
+stats <- txt_freq(stats$token, order = TRUE)
+stats$key <- factor(stats$key, levels = stats$key)
+barchart(key ~ freq, data = head(stats, 20), col = "gold", 
+         main = "Most occurring Verbs", xlab = "Freq")
+```
+
+# Keyword Extraction with RAKE
+
+`RAKE` is one of the most popular unsupervised algorithms for extracting keywords in Information retrieval. `RAKE `short for *Rapid Automatic Keyword Extraction* algorithm, is a domain independent keyword extraction algorithm which tries to determine key phrases in a body of text by analyzing the frequency of word appearance and its co-occurrence with other words in the text.
+
+```{r}
+stats <- keywords_rake(x = x, term = "lemma", group = "doc_id", 
+                       relevant = x$upos %in% c("NOUN", "ADJ"))
+stats$key <- factor(stats$keyword, levels = rev(stats$keyword))
+barchart(key ~ rake, data = head(subset(stats, freq > 3), 20), col = "red", 
+         main = "Keywords identified by RAKE", xlab = "Rake")
+```
+
+## Top Noun—Verb Pairs
+
+Noun phrases are of common interest when doing natural language processing. Extracting noun phrases from text can be done easily by defining a sequence of Parts of Speech tags. 
+
+`as_phrasemachine` recodes **P**arts **o**f **S**peech (POS) tags to one of the following 1-letter tags, in order to simplify writing regular expressions to find Parts of Speech sequences:
+
+A: adjective  
+C: coordinating conjunction  
+D: determiner  
+M: modifier of verb  
+N: noun or proper noun  
+P: preposition  
+O: other elements  
+
+After which identifying a simple noun phrase can be just expressed by using the following regular expression:
+
+`(A|N)*N(P+D*(A|N)*N)*`
+
+which basically says start with adjective or noun, another noun, a preposition, determiner adjective or noun and next a noun again.
+
+```{r}
+## Using a sequence of POS tags (noun phrases / verb phrases)
+x$phrase_tag <- as_phrasemachine(x$upos, type = "upos")
+stats <- keywords_phrases(x = x$phrase_tag, term = tolower(x$token), 
+                          pattern = "(A|N)*N(P+D*(A|N)*N)*", is_regex = TRUE, 
+                          detailed = FALSE)
+
+stats <- stats %>% filter(ngram > 1, freq > 3)
+
+stats$key <- factor(stats$keyword, levels = stats$keyword)
+
+barchart(key ~ freq, data = head(stats, 20), col = "magenta", 
+         main = "Keywords - simple noun phrases", xlab = "Frequency")
+```
+
+# Appendix
+
+## spaCy
+
+- `spaCy` provides currently models for 8 languages: English, German, Spanish, Portuguese, French, Italian, Dutch. 
+- installation of `spacyr` can be challenging - requires installation of the Python package `spacy` which is more difficult to install on a local computer in your corporate office. You can easily get stuck in problems of Python versioning, 32 vs 64 bit architecture issues, admin rights or basic shell commands that you should be aware of
+- does not allow to switch seamlessly between 2 languages (you need to initialize and finalize) which is a burden if you live in a multi-language country like e.g. Belgium
+- spaCy models are constructed on different treebanks each following different guidelines which make cross-language downstream analysis more difficult to harmonize
+- spaCy allows to do tokenization, parts of speech tagging, morphological feature tagging and dependency parsing
+    - it also does entity recognition
+    - spacyr does not provide lemmatization
+    - spaCy also provides wordvectors (for English only) but they are not made available in `spacyr`
+- `spacyr` tends to be faster than `udpipe`
+
+> If you need entity recognition, udpipe is not an option. 
+> If you need lemmatization, spacyr is not an option.
+
+## tidytext
+
+Do not forget about the well-known `tidytext` package!
