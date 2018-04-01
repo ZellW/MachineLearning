@@ -632,3 +632,10 @@ For another time. . . .
 devtools::install_github('catboost/catboost', subdir = 'catboost/R-package')
 ```
 
+# Reference
+
+Great comparision on XGBoost, LightGBM and CatBoost:
+
+https://towardsdatascience.com/catboost-vs-light-gbm-vs-xgboost-5f93620723db
+
+
