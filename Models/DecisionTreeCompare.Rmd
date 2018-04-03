@@ -3,7 +3,7 @@ title: 'Decision Tree Algo Compare'
 output:
     rmdformats::readthedown:
       highlight: pygments
-      code_folding: hide
+      code_folding: show
 ---
 <style type="text/css">
 p{ /* Normal  */
@@ -47,12 +47,12 @@ border-top: ;
 }
 </style>
 
-```{r loadLibs1}
+```{r loadLibs1, warning=FALSE, message=FALSE}
 #if(!require(bayesian_first_aid)){devtools::install_github("rasmusab/bayesian_first_aid")}
 if(!require(easypackages)){install.packages("easypackages")}
 library(easypackages)
 packages("plyr","dplyr","ggplot2", "readr", "tidyr", "gridExtra", "stringr", "lubridate", 
-        "caret", "gbm", prompt = FALSE)
+        "caret", "gbm", "modelr", "ggthemes", "lightgbm", prompt = FALSE)
 
 options(scipen = 999)#Do not display exponents
 
@@ -67,6 +67,17 @@ The UCI Bike dataset is available from a variety of sources.  A copy of the data
 
 ```{r getData, eval=FALSE}
 Bike <- read.csv("~/GitHub/MachineLearning/Models/data/Bike Rental UCI dataset.csv")
+```
+
+The data variables are intuitive except for `weathersit`:
+ 
+- 1: Clear, Few clouds, Partly cloudy, Partly cloudy
+- 2: Mist + Cloudy, Mist + Broken clouds, Mist + Few clouds, Mist
+- 3: Light Snow, Light Rain + Thunderstorm + Scattered clouds, Light Rain + Scattered clouds
+- 4: Heavy Rain + Ice Pallets + Thunderstorm + Mist, Snow + Fog
+
+```{r glimpseBike}
+glimpse(Bike)
 ```
 
 ## Step 2: Data pre-processing
@@ -91,12 +102,32 @@ Bike$yr <- NULL
 
 Normally, when preparing training data you pay attention to two requirements:
 
-- First, find the right data, integrate all relevant features, and reduce the data size if necessary.
+- First, find the right data, integrate all relevant features and reduce the data size if necessary.
 - Second, identify the features that characterize the patterns in the data and if they don't exist, construct them.
 
 It can be tempting to includes many raw data fields in the feature set, but more often, you need to construct additional features from the raw data to provide better predictive power. This is called feature engineering.
 
 In this experiment, the original data is augmented with a number of new columns.  3 new datasets are created with new features following the concepts detailed above.
+
+The training datasets are based on the same raw input data, but  different additional features were added to each training set. 
+
+- Set A = weather + holiday + weekday + weekend features for the predicted day
+- Set B = number of bikes that were rented in each of the previous 12 hours
+- Set C = number of bikes that were rented in each of the previous 12 days at the same hour
+- Set D = number of bikes that were rented in each of the previous 12 weeks at the same hour and the same day
+
+Each of these feature sets captures different aspects of the problem:
+
+- Feature set B captures very recent demand for the bikes.
+- Feature set C captures the demand for bikes at a particular hour. 
+- Feature set D captures demand for bikes at a particular hour and particular day of the week. 
+
+The four training datasets were built by combining the feature set as follows:
+
+- Training set 1: feature set A only
+- Training set 2: feature sets A+B
+- Training set 3: feature sets A+B+C
+- Training set 4: feature sets A+B+C+D
 
 ```{r commonVars, eval=FALSE}
 previous_hrs <- 12
@@ -107,6 +138,8 @@ suffix <- -1:-previous_hrs #to create new columns
 ```
 
 ### Bike Demand for Last 12 Hours
+
+Create new columns to show the bike demand from the last 12 hours.
 ```{r eval=FALSE}
 Bike1 <- Bike
 
@@ -120,10 +153,13 @@ for (i in 1:previous_hrs) {
 new_names_hour <- paste("demand in hour", suffix)
 names(Bike1) <- c(orig_names, new_names_hour)
 ```
+```{r glimpseBike1}
+glimpse(Bike1)
+```
 
 ### Bike Demand Last 12 Hours at Same Hour
 
-Add more columns.
+Add more columns.  Calculate the number of bikes that were rented in each of the previous 12 days at the same hour.
 
 ```{r eval=FALSE}
 Bike2 <- Bike1
@@ -136,10 +172,14 @@ for (i in 1:previous_hrs) {
 new_names_day <- paste("demand in day", suffix)
 names(Bike2) <- c(orig_names, new_names_hour, new_names_day)
 ```
+```{r glimpseBike2}
+glimpse(Bike2)
+```
 
 ### Bike demand in the last 12 weeks: same day and same hour
 
-Add more columns to
+Add more columns to calculate the number of bikes that were rented in each of the previous 12 weeks at the same hour and the same day.
+
 ```{r eval=FALSE}
 Bike3 <- Bike2
 orig_colCnt2 <- orig_colCnt + previous_hrs * 2
@@ -151,6 +191,9 @@ for (i in 1:previous_hrs) {
 new_names_week <- paste("demand in week", suffix)
 names(Bike3) <- c(orig_names, new_names_hour, new_names_day, new_names_week)
 ```
+```{r glimpseBike3}
+glimpse(Bike3)
+```
 
 ## Step 4: Train the model
 
@@ -158,15 +201,11 @@ Next, choose an algorithm to use in analyzing the data. There are many kinds of 
 
 For this experiment, because the goal was to predict a number (the demand for the bikes, represented as the number of bike rentals) we chose a regression model. Moreover, because the number of features is relatively small (less than 100) and these features are not sparse, the decision boundary is very likely to be nonlinear.
 
-Based on these factors, a Boosted Decision Tree Regression is used, a commonly used nonlinear algorithm. 
+Based on these factors, a Boosted Decision Tree Regression is used, a commonly used nonlinear algorithm. However, this experiement is internded to illustrate the process a Data Scientist might use to devlop a model.  Therefore, several tree algoritms will be explored.
 
-For this experiment, default parameter values were used. Perhaps in the future this experiment will be updated to optimized the model performance.
+Rather than splitting the data, cross validation will be used.  (If we were to use train/test splits, use the `yr` variable.  In the dataset, see the column "yr" column in which 0 means 2011 and 1 means 2012. Remove `yr` since it provides no predictive power.)
 
-Rather than splitting the data, cross validation will be used.
-
-If we were to use train/test splits, use the `yr` variable.  (In the dataset, see the column "yr" column in which 0 means 2011 and 1 means 2012. Remove `yr` since it provides no predictive power.)
-
-```{r dataSplit, eval=FALSE}
+```{r dataSplit, eval=FALSE, echo=FALSE}
 trainData <- Bike %>% filter(yr == 0) %>% mutate(yr = NULL)
 testData <- Bike %>% filter(yr ==1) %>% mutate(yr = NULL)
 
@@ -180,11 +219,25 @@ trainData3 <- Bike3 %>% filter(yr == 0) %>% mutate(yr = NULL)
 testData3 <- Bike3 %>% filter(yr ==1) %>% mutate(yr = NULL)
 ```
 
-```{r simpleDecisionTree, eval=FALSE}
+## Simple Decision Tree
+
+First, produce a common decision tree:
+
+```{r simpleDecisionTree, eval=FALSE, echo=FALSE}
 simple_tree <- rpart::rpart(cnt~., data = Bike, method = "anova", cp = 0.03)
 ```
-```{r}
+```{r plotSimpleTree, eval=FALSE, echo=FALSE}
 rpart.plot::rpart.plot(simple_tree)
+```
+```{r eval=FALSE, echo=FALSE}
+#Same result but useful code for more complex models when cp (complexity parameter) is not set
+#It is the amount by which splitting that node improved the relative error. For example, splitting the root node drops the relative error from 1.0 to 0.5, so the CP of the root node is 0.5. The CP of the next node is only 0.01 (which is the default limit for deciding when to consider splits). Because splitting that node resulted in an improvement of 0.01, the tree building stops.
+rpart::plotcp(simple_tree)
+min_cp = simple_tree$cptable[which.min(simple_tree$cptable[,"xerror"]),"CP"]
+min_cp
+# prune tree using best cp
+simple_tree_prune = rpart::prune(simple_tree, cp = min_cp)
+rpart.plot::rpart.plot(simple_tree_prune)
 ```
 
 ```{r eval=FALSE}
@@ -194,13 +247,20 @@ trainctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3, verbo
 #This version does not like the column names, so do not use the formula method
 #rpart_tree <- train(cnt~., data = Bike1, method = "rpart", trControl = trainctrl)
 
-rpart_tree <- train(
-  x = Bike[, names(Bike) != "cnt"],
-  y = Bike$cnt,
-  method = "rpart",
-  trControl = trainctrl
-)
+rpart_tree <- train(x = Bike[, names(Bike) != "cnt"], y = Bike$cnt, method = "rpart", trControl = trainctrl)
+```
 
+```{r}
+rpart.plot::rpart.plot(simple_tree)
+```
+
+## Random Forest
+
+Compare a basic decision tree to a random forest model.  (Definitions of the models is beyond the intent of this document.)
+
+> No graphical ouput but now we compare the RMSE of each model.
+
+```{r rf_tree, eval=FALSE}
 #Random Forest
 rf_tree <- train(cnt~., data = Bike1, method = "rf",  trControl = trainctrl)
 ```
@@ -209,6 +269,10 @@ rf_tree <- train(cnt~., data = Bike1, method = "rf",  trControl = trainctrl)
 resamps <- resamples(list(singleTree=rpart_tree, randomForest=rf_tree))
 summary(resamps)
 ```
+
+## GBM Model
+
+Continue the evalaution of tree algoirthms using a GBM model.
 
 ```{r GBM_model, eval=FALSE}
 set.seed <- 12347
@@ -222,11 +286,13 @@ resamps <- resamples(list(singleTree=rpart_tree, randomForest=rf_tree, GBM = gbm
 summary(resamps)
 ```
 
-```{r}
+```{r echo=FALSE}
 getModelInfo()$gbm$parameters
 ```
 
-```{r GBM_model, eval=FALSE}
+Advance the GBM model by tuning hyperparameters.
+
+```{r GBM_model2, eval=FALSE}
 set.seed <- 12347
 myGrid <- expand.grid(n.trees = c(150, 175, 200, 250),
                       interaction.depth = c(5, 6, 7, 8, 9),
@@ -238,9 +304,11 @@ gbm_tree2 <- train(cnt~., data = Bike1, method = "gbm", trControl = trainctrl,
 gbm_tree2
 ```
 
-```{r}
+```{r eval=FALSE, echo=FALSE}
 gbm_tree2$bestTune
 ```
+
+Train the GBM model using the best perforoing hyperparameters found above.
 
 ```{r eval=FALSE}
 set.seed <- 12347
@@ -262,6 +330,8 @@ dotplot(resamps, metric = "RMSE", main = "Model Compare")
 bwplot(resamps, metric = "RMSE", main = "Model Compare")
 ```
 
+Peek at the most influential variables in the final GBM model.
+
 ```{r}
 plot(varImp(gbm_tree2, scale = TRUE))
 ```
@@ -269,16 +339,13 @@ plot(varImp(gbm_tree2, scale = TRUE))
 ```{r newVisual}
 gather_residuals(Bike1, gbm_tree2, .resid = "resid", .model = "model") %>%
   ggplot(aes(cnt, resid, color = holiday)) + geom_point() 
-
-+
-  ggtitle("GLM residuals spread out at higher counts") +
-  geom_hline(yintercept = 20, lty = 2, size = 1) +
-  geom_abline(intercept = 80, slope = 0.15, colour = "grey80", size = 2, lty = 3) +
-  geom_abline(intercept = -80, slope = -0.17, colour = "grey80", size = 2, lty = 3) +
-  scale_colour_economist() + theme_thinkr + cap
 ```
 
-```{r}
+## XGBoost
+
+XGBoost is one of the most popular boosted tree algoritms.  It is commonly use in Kaggel competitons.  Lets find out how it performs on our data.
+
+```{r message=FALSE, warning=FALSE, results='hide'}
 set.seed <- 12347
 
 library(xgboost)
@@ -320,6 +387,11 @@ watchlist <- list(train = myTrain_matrix, test = myTest_matrix)
 
 best_model <- xgb.train(params = xgb_params, data = myTrain_matrix, nrounds = 100,
                         watchlist = watchlist)
+```
+After 100 iterations, the final record is:
+
+```{r}
+best_model$evaluation_log[100,]
 
 #Plot results
 myErrors <- data.frame(best_model$evaluation_log)
@@ -327,23 +399,31 @@ myErrors <- data.frame(best_model$evaluation_log)
 lines(myErrors$iter, myErrors$test_rmse, col = "red")}
 ```
 
-```{r}
+The "space" between the <span style="color:blue">blue</span> and <span style="color:red">red</span> lines indicate overfitting.  Ideally these lines should be close together so the results from the `train` data more closely match the results from the `test` data.
+
+```{r eval=FALSE, echo=FALSE}
 min(myErrors$test_rmse)
 myErrors[myErrors$test_rmse == min(myErrors$test_rmse),]
 ```
 
-```{r}
+Lets add a parameter below:
+
+- lower eta is robust to overfitting.  Default = 0.3; can range 0-1
+
+```{r results='hide'}
 set.seed <- 12347
 best_model <- xgb.train(params = xgb_params, data = myTrain_matrix, nrounds = 100,
-                        watchlist = watchlist,
-                        eta = 0.08)
+                        watchlist = watchlist, eta = 0.08)
+```
+```{r}
+best_model$evaluation_log[100,]
 #Plot results
 myErrors <- data.frame(best_model$evaluation_log)
 {plot(myErrors$iter, myErrors$train_rmse, col = "blue")
 lines(myErrors$iter, myErrors$test_rmse, col = "red")}
 ```
 
-- lower eta is robust to overfitting.  Default = 0.3; can range 0-1
+Overfitting appears to be less of a concern.
 
 ```{r XGB_Importance}
 myImportance <- xgb.importance(colnames(myTrain_matrix), model = best_model)
@@ -352,24 +432,24 @@ print(myImportance)#Gain is most important
 xgb.plot.importance(myImportance)
 ```
 
-```{r XGB_Prediction}
-myPredictions <- predict(best_model, newdata = myTest_matrix)
+Run XGBoost again with more optimized parameters.
 
-myCompare <- data.frame(Prediction = myPredictions, Actual = myTest$cnt)
-head(myCompare, 20)
-```
+- `tree.depth`; default = 6; 1 to INF
+- larger values of `gamma` produces more conservative algo (avoid overfitting); range 0 - INF; default = 0
+- lower values of `subsample` helps prevent overfitting. Default = 1 (100%).  Range 0 - 1. subsample ratio of the training instance. Setting it to 0.5 means that XGBoost randomly collected half of the data instances to grow trees and this will prevent overfitting.
+- `colsample_bytree` default = 1. subsample ratio of columns when constructing each tree.
+- `missing` very useful when dealing with large data and much missing data
 
-```{r XGB_MoreParams}
+```{r XGB_MoreParams, results='hide'}
 set.seed <- 12347
 #http://xgboost.readthedocs.io/en/latest/parameter.html
 best_model <- xgb.train(params = xgb_params, data = myTrain_matrix, nrounds = 300,
-                        watchlist = watchlist,
-                        eta = 0.02,
-                        max.depth = 5,
-                        gamma = 50,
-                        subsample = .5,
-                        colsample_bytree = .9,
+                        watchlist = watchlist, eta = 0.02, max.depth = 5,
+                        gamma = 50, subsample = .5, colsample_bytree = .9,
                         missing = NA, seed = 12345)
+```
+```{r}
+best_model$evaluation_log[300,]
 #Plot results
 myErrors <- data.frame(best_model$evaluation_log)
 {plot(myErrors$iter, myErrors$train_rmse, col = "blue")
@@ -380,11 +460,7 @@ lines(myErrors$iter, myErrors$test_rmse, col = "red")}
 save.image("~/GitHub/LargeDataFiles/TreeAlgoCompare.RData")
 ```
 
-- `tree.depth`; default = 6; 1 to INF
-- larger values of `gamma` produces more conservative algo (avoid overfitting); range 0 - INF; default = 0
-- lower values of `subsample` helps prevent overfitting. Default = 1 (100%).  Range 0 - 1. subsample ratio of the training instance. Setting it to 0.5 means that XGBoost randomly collected half of the data instances to grow trees and this will prevent overfitting.
-- `colsample_bytree` default = 1. subsample ratio of columns when constructing each tree.
-- `missing` very useful when dealing with large data and much missing data
+Make predictions using optimized XGBoost:
 
 ```{r XGB_Prediction}
 myPredictions <- predict(best_model, newdata = myTest_matrix)
@@ -473,7 +549,7 @@ The size of data is increasing day by day and it is becoming difficult for tradi
 
 Knowing and using above parameters will help you implement the model. Remember, the implementation of LightGBM is easy but parameter tuning is difficult. 
 
-```{r lightGBMinstall, eval=FALSE}
+```{r lightGBMinstall, eval=FALSE, echo=FALSE}
 #Install CMAKE (https://cmake.org/download/) and RTools 64 bit required first!
 # library(devtools)
 # options(devtools.install.args = "--no-multiarch") # if you have 64-bit R only, you can skip this
@@ -496,7 +572,7 @@ lgb.dl(commit = "master", compiler = "gcc", repo = "https://github.com/Microsoft
 
 ## LightGBM Example
 
-```{r}
+```{r lightGBM_ex, results='hide'}
 datasetLGBM <- read.csv("~/GitHub/MachineLearning/Models/data/Social_Network_Ads.csv")
 datasetLGBM <- datasetLGBM %>% select(-User.ID)
 
@@ -526,24 +602,18 @@ params <- list(objective = "binary", metric = "binary_logloss")
 valids <- list(test=dtest)
 num_classes <- length(unique(datasetLGBM$Purchased))
 
-bst <- lgb.train(params,
-                dtrain,
-                nrounds = 100,
-                valids,
-                num_leaves = 10,
-                min_data = 50,
-                boosting_type = "gbdt",
-                sub_feature = 0.5,
-                max_depth = 10,
-                categorical_feature = categoricals
-                )
+bst <- lgb.train(params, dtrain, nrounds = 100, valids, num_leaves = 10, min_data = 50,
+                boosting_type = "gbdt", sub_feature = 0.5, max_depth = 10,
+                categorical_feature = categoricals)
 ```
 
-Number of Rounds: __`r bst$current_iter() `__.
+Number of Rounds: `r bst$current_iter() `
 
-Multilogloss of Best Model: __`r bst$record_evals$test$multi_logloss$eval %>% unlist() %>% tail(1)`__.
+Multilogloss of Best Model: `r bst$record_evals$test$binary_logloss$eval %>% unlist() %>% tail(1)`
 
-```{r fig.width = 10, fig.height = 18}
+> Entered bug on Github - lgb.importance does not appear to be included in the current code base.
+
+```{r fig.width = 10, fig.height = 18, eval=FALSE}
 df_imp <- tbl_df(lgb.importance(bst, percentage = TRUE))
 
 df_imp %>%
@@ -567,21 +637,12 @@ df_imp %>%
         angle = 90))
 ```
 
-```{r}
+```{r lightGBM_pred_ex, eval=FALSE}
 test <- (datasetLGBM %>% select(-Purchased) %>% data.matrix())[-trainIndex,]
 preds_matrix <- predict(bst, test, reshape=T)
 ```
 
-
 ```{r}
-train_lgbm <- select(myTrain, -cnt) %>% as.matrix()
-trainLable_lgbm <- select(myTrain, cnt) %>% as.matrix()
-
-train_lgbm <- lgb.Dataset(train_lgbm, label = trainLable_lgbm)
-params_lgbm <- list(objective="regression", metric="l2")
-model_lgbm <- lgb.train(params_lgbm, train_lgbm, min_data=1, learning_rate=.5)
-
-
 datasetLGBM <- bind_cols(myTrain %>% select(-cnt) %>% 
                               mlr::createDummyFeatures(), myTrain %>% select(cnt))
 
@@ -608,26 +669,20 @@ params <- list(objective = "regression", metric = "mse")
 valids <- list(test=dtest)
 #num_classes <- length(unique(datasetLGBM$Purchased))
 
-bst <- lgb.train(params,
-                dtrain,
-                nrounds = 300,
-                valids,
-                num_leaves = 10,
-                min_data = 50,
-                boosting_type = "gbdt",
-                sub_feature = 0.5,
-                max_depth = 30,
+bst2 <- lgb.train(params, dtrain, nrounds = 300, valids, num_leaves = 10, min_data = 50,
+                boosting_type = "gbdt", sub_feature = 0.5, max_depth = 30,
                 categorical_feature = categoricals)
 
 test <- (datasetLGBM %>% select(-cnt) %>% data.matrix())[-trainIndex,]
-preds_matrix <- predict(bst, test, reshape=T)
+preds_matrix <- predict(bst2, test, reshape=T)
+preds_matrix[1:20]
 ```
 
 # CatBoost
 
 For another time. . . .
 
-```{r}
+```{r eval=FALSE}
 #install.packages('devtools')
 devtools::install_github('catboost/catboost', subdir = 'catboost/R-package')
 ```
@@ -638,4 +693,7 @@ Great comparision on XGBoost, LightGBM and CatBoost:
 
 https://towardsdatascience.com/catboost-vs-light-gbm-vs-xgboost-5f93620723db
 
+More options for decision trees than most think:
+
+https://www.r-bloggers.com/a-brief-tour-of-the-trees-and-forests/
 
