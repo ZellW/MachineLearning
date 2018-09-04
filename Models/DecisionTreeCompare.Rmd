@@ -270,6 +270,16 @@ resamps <- resamples(list(singleTree=rpart_tree, randomForest=rf_tree))
 summary(resamps)
 ```
 
+### Variable Importance
+
+This code is simply an exploration of the random forest model results.
+
+```{r}
+varImp(rf_tree, useModel = FALSE)#http://topepo.github.io/caret/variable-importance.html
+```
+
+> If the `randomForest` package was used, variable imporatance can be analyzed using `randomForestExplainer`
+
 ## GBM Model
 
 Continue the evalaution of tree algoirthms using a GBM model.
@@ -285,6 +295,15 @@ gbm_tree
 resamps <- resamples(list(singleTree=rpart_tree, randomForest=rf_tree, GBM = gbm_tree))
 summary(resamps)
 ```
+
+### Variable Importance
+
+This code is simply an exploration of the GBM results.
+
+```{r}
+varImp(gbm_tree, scale = FALSE)#http://topepo.github.io/caret/variable-importance.html
+```
+
 
 ```{r echo=FALSE}
 getModelInfo()$gbm$parameters

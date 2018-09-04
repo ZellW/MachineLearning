@@ -1,0 +1,253 @@
+---
+title: "Self Organizing Maps"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: hide
+---
+
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+
+body{ /* Normal  */
+   font-size: 14px;}
+
+td {  /* Table  */
+   font-size: 12px;}
+
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+
+#table-of-contents h2 {
+background-color: #4294ce;}
+
+#table-of-contents{
+background: #688FAD;}
+
+#nav-top span.glyphicon{
+color: #4294ce;}
+
+#postamble{
+background: #4294ce;
+border-top: ;}
+</style>
+
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr", "dplyr", "ggplot2", "kableExtra", "kohonen", "dummies", prompt = FALSE)
+
+setwd("~/GitHub/MachineLearning/EDA")
+```
+
+# Introduction
+
+Exploratory analysis, where visualization plays a very important role, has become more and more diﬃcult given the increasing dimensionality of the data. There is a real need for methods that provide meaningful mappings into two dimensions, so that we can fully utilize the pattern recognition capabilities of our own brains. There are many approaches to mapping a high dimensional data set into two dimensions, of which principal component analyis is the most used. However, in many cases more than two dimensions are needed to provide a reasonably useful picture of the data so that visualization remains a challenge. 
+
+Self-organizing maps can help resolve this challenge. Self-organizing maps are an unsupervised learning approach for visualizing multi-dimensional data in a two-dimensional plane. They are great for clustering and finding out correlations in the data. The R package `kohonen` provides simple functions for self-organizing maps with emphasis on visualization. The main features of this package are provided below.
+
+```{r}
+kohonenFeatures <- data.frame(Feature_Name = 
+                    c("som", "xyf", "bdk", "supersom", "plot.kohonen", "asummary.kohonen", "map.kohonen", "predict.kohonen"),
+                    Desc = c("standard SOM", "supervised SOM", "supervised SOM alternative", "SOM with multiple maps",
+                             "plotting function", "summary function", "map data to most similar unit", "predict properties"))
+kohonenFeatures %>% kable() %>% kable_styling(bootstrap_options = c("striped","responsive", full_width = F))
+```
+
+```{r}
+myDF <-read.csv("data/titanic_train.csv")
+myDF <- myDF %>% select(-c(PassengerId, Name, Ticket, Cabin))
+myDF <- dummy.data.frame(myDF)
+myDF_NoScale <- myDF
+myDF$Age <- scale(myDF$Age)
+myDF$Fare <- scale(myDF$Fare)
+myDF <- myDF[complete.cases(myDF),]
+
+myDF_Reduced <- myDF %>% select(Survived, Pclass, Sexfemale, Sexmale)
+```
+
+```{r}
+# Change the data frame with training data to a matrix
+# Also center and scale all variables to give them equal importance during
+# the SOM training process. 
+myMatrix <- as.matrix(myDF)
+myMatrix_Reduced <- as.matrix(myDF_Reduced)
+
+# Create the SOM Grid - you generally have to specify the size of the 
+# training grid prior to training the SOM. Hexagonal and Circular 
+# topologies are possible
+som_grid <- somgrid(xdim = 10, ydim = 10, topo = "hexagonal")
+som_grid_reduced <- somgrid(xdim = 4, ydim = 4, topo = "hexagonal")
+
+som_model <- som(myMatrix, 
+		grid=som_grid, 
+		rlen=5000, 
+		# 100 is usually sufficient
+		alpha=c(0.05,0.01), 
+		keep.data = TRUE )
+
+som_model_Reduced <- som(myMatrix_Reduced, 
+		grid=som_grid_reduced, 
+		rlen=3000, 
+		# 100 is usually sufficient
+		alpha=c(0.05,0.01), 
+		keep.data = TRUE )
+
+```
+
+```{r}
+plot(som_model, type="changes")
+```
+
+```{r}
+plot(som_model_Reduced, type="changes")
+```
+
+Plot the count of how many samples are mapped to each node on the map. This metric can be used as a measure of map quality – ideally the sample distribution is relatively uniform. Large values in some map areas suggests that a larger map would be benificial. Empty nodes indicate that your map size is too big for the number of samples. Aim for at least 5-10 samples per node when choosing map size. 
+
+```{r}
+rainbowcols <- rainbow(6, s = 0.5)
+hist(discoveries, col = rainbowcols)
+
+mutedBlueHotRed <- function(n, alpha = 1) {
+     rainbow(n, end=4/6, s = 0.5, alpha=alpha)[n:1]
+}
+
+plot(som_model, type="count", palette.name = mutedBlueHotRed)
+```
+
+```{r}
+plot(som_model_Reduced, type="count", palette.name = mutedBlueHotRed)
+```
+
+Often referred to as the “U-Matrix”, this plot is of the distance between each node and its neighbors. The plot shows areas of low neighbor distance indicate groups of nodes that are similar. Areas with large distances indicate the nodes are much more dissimilar – and indicate natural boundaries between node clusters. 
+
+```{r}
+plot(som_model, type="dist.neighbours")
+```
+```{r}
+plot(som_model_Reduced, type="dist.neighbours")
+```
+
+Fan diagram below sho the distribution of variables across the map.  Useful when the number of variables is <= 5.  Provides a good way to see general patterns by examing the dominate colors.
+
+```{r}
+plot(som_model, type="codes", palette.name = mutedBlueHotRed)
+```
+
+
+```{r}
+plot(som_model_Reduced, type="codes", palette.name = mutedBlueHotRed)
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+plot(som_model, type = "property", property = getCodes(som_model)[,4], main=colnames(getCodes(som_model))[4], palette.name=mutedBlueHotRed)
+
+var_unscaled <- aggregate(as.numeric(myDF_NoScale[,var]), by=list(som_model$unit.classif), FUN=mean, simplify=TRUE)[,2] 
+plot(som_model, type = "property", property=var_unscaled, main=colnames(getCodes(som_model))[var], palette.name=coolBlueHotRed)
+```
+
+
+References
+
+https://www.slideshare.net/shanelynn/2014-0117-dublin-r-selforganising-maps-for-customer-segmentation-shane-lynn
+https://www.r-bloggers.com/self-organising-maps-for-customer-segmentation-using-r/ (same as above)
+
+https://cran.r-project.org/web/packages/kohonen/kohonen.pdf
+
+Self- and Super-organizing Maps in R: The kohonen Package https://www.jstatsoft.org/search/search?simpleQuery=kohonen&searchField=query
+
+https://clarkdatalabs.github.io/soms/SOM_NBA 
+
+https://stackoverflow.com/questions/49552721/som-map-kohonen-package-numerical-result
+
+https://databasedinvesting.blogspot.com/2018/08/mapping-stock-market-using-self.html
+
+
+```{r}
+# Plot SOM Heatmap for variable 
+#
+# Shane Lynn 13/1/2014
+
+# this function is to plot the heatmap of a variable
+
+plotHeatMap <- function(som_model, data, variable=0){    
+  # Plot a heatmap for any variable from the data set "data".
+  # If variable is 0, an interactive window will be provided to choose the variable.
+  # If not, the variable in "variable" will be plotted.
+  
+  require(dummies)
+  require(kohonen)
+  source('coolBlueHotRed.R')
+  
+  interactive <- TRUE
+  
+  while (interactive == TRUE){
+    
+    if (variable == 0){
+      #show interactive window.
+      color_by_var <- select.list(names(data), multiple=FALSE,
+                                  graphics=TRUE, 
+                                  title="Choose variable to color map by.")
+      # check for user finished.
+      if (color_by_var == ""){ # if user presses Cancel - we quit function        
+        return(TRUE)
+      }
+      interactive <- TRUE
+      color_variable <- data.frame(data[, color_by_var])
+          
+    } else {
+      color_variable <- data.frame(data[, variable])
+      color_by_var <- names(data)[variable]
+      interactive <- FALSE
+    }
+      
+    #if the variable chosen is a string or factor - 
+    #Get the levels and ask the user to choose which one they'd like.
+    
+    if (class(color_variable[,1]) %in% c("character", "factor", "logical")){
+      #want to spread this out into dummy factors - but colour by one of those.
+      temp_data <- dummy.data.frame(color_variable, sep="_")
+      chosen_factor <- select.list(names(temp_data), 
+                                   multiple=FALSE,
+                                   graphics=TRUE, 
+                                   title="Choose level of variable for colouring")
+      color_variable <- temp_data[, chosen_factor]
+      rm(temp_data, chosen_factor)
+      color_by <- color_variable
+    } else {      
+      #impute the missing values with the mean.
+      color_variable[is.na(color_variable[,1]),1] <- mean(color_variable[,1], na.rm=TRUE)
+      #color_by <- capVector(color_variable[,1])
+      #color_by <- scale(color_by)  
+      color_by <- color_variable[,1]
+    }
+    unit_colors <- aggregate(color_by, by=list(som_model$unit.classif), FUN=mean, simplify=TRUE)
+    plot(som_model, type = "property", property=unit_colors[,2], main=color_by_var, palette.name=coolBlueHotRed)    
+  }
+}
+
+plotHeatMap(som_model_Reduced, myDF_Reduced, variable = "Survived")
+```
+
+

@@ -51,7 +51,7 @@ border-top: ;
 if(!require(easypackages)){install.packages("easypackages")}
 library(easypackages)
 packages("plyr", "dplyr", "xda", "ggplot2", "readr", "gridExtra", "funModeling", 
-     "corrplot", prompt = FALSE)
+     "corrplot", "caret", prompt = FALSE)
 ```
 
 # Introduction
@@ -107,8 +107,8 @@ freq(births, input = c("mother_race", "cigarette_use", "alcohol_use", "is_male")
 freq(births, input = c("plurality"))
 ```
 
-```{r}
-plot_num(births)
+```{r eval=FALSE}
+funModeling::plot_num(births)
 ```
 
 ```{r}
@@ -143,8 +143,8 @@ We can’t really see an obvious correlation between the two variables. I’ve e
 ## father_age & father_race
 
 ```{r message=FALSE, warning=FALSE}
-sum(is.na(tmpBirths$father_race))
-tmpBirths <- tmpBirths %>% filter(!is.na(father_race))
+#sum(is.na(tmpBirths$father_race))
+#tmpBirths <- tmpBirths %>% filter(!is.na(father_race))
 
 ggplot(tmpBirths, aes(x = father_age, y = gestation_weeks)) + geom_point(shape = 1, alpha = 0.1, color = "blue") + 
      geom_smooth(method=lm) + facet_wrap(~father_race)
@@ -156,7 +156,7 @@ Still not obvious, but some of the trend lines are showing upward or downward tr
 Here is the similar scatter chart we have already seen above. This time, I’m assigning `mother_age` to X-Axis.
 
 ```{r}
-sum(is.na(tmpBirths$mother_age))
+#sum(is.na(tmpBirths$mother_age))
 
 ggplot(tmpBirths, aes(x = mother_age, y = gestation_weeks)) + geom_point(shape = 1, alpha = 0.1, color = "blue") + 
      geom_smooth(method=lm) + facet_wrap(~mother_race)
@@ -451,7 +451,7 @@ Linear Regression function ‘lm’ in R automatically transforms a categorical 
 
 Each of the dummy columns represents each `mother_race` type, except for one `mother_race` type, in this case, that is American Indian, which happens to be the base level of `mother_race` column. **How has the base level been decided**?
 
-If a predictor variable is `haracter data type, then R’s lm function automatically picks the first unique value in an alphabetical order and set it to the base level. And, ‘American Indian` happens to be the first value.  This concept of the base level becomes very important when we try to understand the coefficients for the categorical variables.
+If a predictor variable is `character data type, then R’s lm function automatically picks the first unique value in an alphabetical order and set it to the base level. And, ‘American Indian` happens to be the first value.  This concept of the base level becomes very important when we try to understand the coefficients for the categorical variables.
 
 We can see `mother_race — Black` P-value is very small. And we can interpret it as, *One value increase of `mother_race — Black` would decrease about 0.36 weeks in `gestation_weeks` when all the other variables stay the same.*  The last part is technically saying that all the other dummy variables are zero.
 
@@ -518,8 +518,208 @@ We have learned Black Mother tends to have about 0.36 weeks shorter `gestation_w
 
 Based on the findings so far, we know that `mother_age` and `mother_race` tend to have a reasonable amount of influence on the changes in `gestation_weeks`.
 
-Now, as you might be wondering, the obvious question is, which of `mother_age` and `mother_race` is more directly influencing the changes in `gestation_weeks`? Maybe some of the `mother_race`s tend to be older than the others. If that’s the case `mother_race` might be carrying over the influence of `mother_age`.
+Now, as you might be wondering, the obvious question is, which of `mother_age` and `mother_race` is more directly influencing the changes in `gestation_weeks`? Maybe some of the `mother_race` tend to be older than the others. If that’s the case `mother_race` might be carrying over the influence of `mother_age`.
+
+# Numerical and Categorical Predictors
+
+So far, we have found that there are statistically significant relationships between `Mother Race` and `Gestation Week` and between `Mother Age` and `Gestation Week`.  Now, take a look at the relationship between `Mother Race` and `Mother Age` by using Boxplot chart.
+
+```{r}
+ggplot(sample_n(births, 100000), aes(as.factor(mother_race), mother_age)) + 
+     geom_boxplot(color = "navy", fill = "navy", alpha = .3, na.rm = TRUE) +
+     labs(x="Mother Race", y = "Mother Age")
+```
+
+We can see that some of the Mother Races like Chinese, Japanese, and Filipino tend to have babies at older ages than other races like White, Black, American Indian, and Hawaiian.
+
+There seems to be some degree of correlation between `Mother Race` and `Mother Age`. Now, when we say “one value increase in `Mother Age` would tend to decrease `Gestation Week` for some degrees”, we are not sure if `Mother Age` alone is the one influencing `Gestation Week`. `Mother Age` might be carrying the influence of `Mother Race`. And this goes the other way around. When we say “Black mothers tend to have shorter gestation week compared to White mothers”, `Mother Race` alone might not be the one influencing `Gestation Week`, instead, it might be carrying the influence of `Mother Age`.
+
+You know by now what to do to clarify this. Add them together as the predictor variables and re-build the Linear Regression model.
+
+```{r}
+model_lm4 = lm(gestation_weeks ~ mother_age+mother_race, data = births)
+summary(model_lm4)
+```
+
+We can see that both `Mother Age` and `Mother Race—Black` are the two statistically significant variables and both of them have the negative impacts on `Gestation Week` meaning that one year increase in `Mother Age` would make `Gestation Week` shorter for some degrees while Mother being Black also would make `Gestation Week` shorter.
+
+How much does Gestation Week get shorter?  If Mother Age stays the same, then Black Mothers tend to have 0.34 weeks shorter Gestation Week.
+
+And, if Mother Race stays the same, then one year increase in `Mother Age` would make Gestation Week 0.017 weeks shorter.
+
+Which of the two variables have more influences on the changes in Gestation Week?
+
+- One year increase in `Mother Age` tends to have 0.017 weeks shorter `Gestation Week`.
+- `Mother Race being Black` tends to have 0.34 weeks shorter `Gestation Week` compared to White.
+
+So, does that mean Mother being Black can make a much bigger impact than Mother Age?
+
+Not so quick. . . we are dealing with two completely different units here. One value change in `Mother Age` we are talking about is just one year and that is not much of the difference, intuitively speaking. But one value change in `Mother Race` means whether a given mother is Black or White, Japanese or White, etc., and that is a much bigger difference compared to the one year age difference.
+
+So, when we look at the coefficients for these variables, we are not sure which of the two variables has a bigger influence on `Gestation Week` than the other.
+
+This is when *T Ratio* comes in handy.
+
+T Ratio is the metric that indicates how far from the values that can happen with the null hypothesis. It is calculated by dividing the coefficient by the standard error. With a large enough sample, its probability distribution called T-Distribution (similar to Normal Distribution).
+
+Take a look at the T-Ratio values for `Mother Race` and `Mother Age`.  The t-ratio is the estimate divided by the standard error. With a large enough sample, t-ratios greater than 1.96 (in absolute value) suggest that your coefficient is statistically significantly different from 0 at the 95% confidence level. A threshold of 1.645 is used for 90% confidence.
+
+```{r tRatio}
+str(summary(model_lm4))
+
+summary(model_lm4)$coefficients[,1]#Estimate
+summary(model_lm4)$coefficients[,2]#Std.Error
+
+myTratio <- summary(model_lm4)$coefficients[,1] / summary(model_lm4)$coefficients[,2]
+```
+
+Because `mother_age` is much farther out from -1.96 than `mother_raceBlack`, it is fair to conclude `mother_age` is more significant.
+
+So far, we understand which variables are more significant in term of the power of influence on `Gestation Week` **when only one variable’s value changes**. But we still don’t know which variables would influence Gestation Week more than the others when their values change together.
+
+Remember that the way we interpret the coefficients of Linear Regression model is:
+
+> One value change in a given predictor variable can explain X number of change in the target variable when all the other predictor variables stay the same.
+
+So, the model is actually not saying that `Mother Race` is more influential than `Mother Age`. Rather, the significance of the changes in `Gestation Week` that are influenced by `Mother Age` alone is bigger than by `Mother Race` alone.
+
+If you want to know which variables are more influential on the changes in `Gestation Week` (or which variables are more useful to predict `Gestation Week` ), then there are other techniques we can use.  For example, we can use Random Forest algorithm, which can tell us which predictor variables have more influences on the target variable. This is called *Variable Importance*.
+
+```{r}
+myTreeData <- births %>% select(-c(5, 10, 12))
+myTreeData <- myTreeData %>% tidyr::drop_na()
+myTree <- train(gestation_weeks~., data = sample_n(myTreeData, 5000), method="rf", 
+                trControl = trainControl(method="cv", number =2), importance=T)
+varImp(myTree)
+plot(varImp(myTree), top = 20)
+```
+
+Anoterh method to identify imporatnat variables is using `caret` `Recursive Feature Elminination` function.  (It is a version of backwards elimination.)  See https://topepo.github.io/caret/recursive-feature-elimination.html
+
+```{r}
+# Must convert character to factor
+myTreeData2 <- myTreeData %>% mutate_if(is.character, as.factor)
+# define the control using a random forest selection function
+rfe_control <- rfeControl(functions=rfFuncs, method="cv", number=2)
+# run the RFE algorithm
+rfe_results <- rfe(myTreeData2[1:5000,1:12], myTreeData2[1:5000,13], sizes=c(1:12), rfeControl=rfe_control)
+# summarize the results
+```
+```{r}
+print(rfe_results)
+# list the chosen features
+predictors(rfe_results)
+# plot the results
+plot(rfe_results, type=c("g", "o"))
+```
+
+It appears a model with 5 variables might offer a good solution!
+
+While `caret` offers nearly all the functions you will ever *need*, there are helpful functions that are not currently supported.  One of these is **Partial Dependency Plots** which tells us how the changes in each variable would influence the target variable values. 
+
+The plot below shows how `Gestation Week` would change when `Mother Age` changes.  `Gestation Week` (Y-Axis) increases as `Mother Age` (X-Axis) increases up to age 25. And `Gestation Week` decreases as `Mother Age` increases up to age 47 when `Gestation Week` starts increasing again.  (The inflection values change based on the number of data points evalauted in the randomForest model which is limited by RAM.)
+
+Given that a majority of the data resides between age 25 and 35 those upward trends might not be statistically significant.
+```{r}
+library(randomForest)
+myRandomForest <- randomForest(gestation_weeks~., myTreeData2[1:5000,])
+partialPlot(myRandomForest, myTreeData2[1:5000,], mother_age)
+```
+
+The relationship is not linear between the variables. As the name suggests, Linear Regression is not good at capturing non-linear relationships.
+
+# Part 5
+
+As we start building the models we would wonder which variables should be included as the predictors and which ones shouldn’t.
+This is actually a big topic itself, but in this post, I am going to talk about what metrics to check when adding or removing the variables and how they change the values.
+
+Lets add all the variables and build a Linear Regression model first.
+
+```{r}
+model_lm5 = lm(gestation_weeks ~ ., data = myTreeData2)#Note lm does not like NAs - eason for using myTreeData2
+summary(model_lm5)
+```
+
+```{r}
+#arm - https://druedin.com/2015/02/28/how-to-create-coefficient-plots-in-r-the-easy-way/
+#alternative using ggplot: https://gist.github.com/dsparks/4332698
+library(arm)
+model_lm5$coefficients[1:5]
+coefplot(model_lm5, vertical=F, col.pts = "blue", cex.var = 0.6)
+```
+
+R Squared is now 0.3073, this means that this model can explain 30% of the variability of Gestation Week. It’s not great, but it is the best so far in this series!
+
+RMSE (Root Mean Square Error) is 2.03 so the average difference between the predicted values and the actual values is about 2 weeks.
+
+All in all, the quality of the model is still not that great from the prediction point of view, though it has made a notable progress. But, as you have already known by now, what we are trying to do here is not about prediction, instead, we are trying to gain insights into the relationship between the variables.
+
+Therefore, the most important metric here is actually `P-Value`. This model shows 0 as you can see above. This means that under the assumption that these predictor variables have nothing to do with the changes in `Gestation Week` — Null Hypothesis — the probability of observing the changes in `Gestation Week` by chance is almost 0 (P-Value), hence we can conclude that this model with all these variables have something to do with the changes in `Gestation Week` in a statistically significant way.
+
+## How to Select Variables
+
+For example, we have `Month` variable, but does the baby’s birth month really matter for `Gestation Week` to be shorter or longer? The P-Value for `Month` variable is 0.47.
+
+Now, we have included all the variables as predictors, but do we really need them all?
+
+### R Squared
+
+As you recall, R Squared is useful for measuring how much of the variability of the target variable. In this example, 30% of Gestation Week’s variability can be explained by this model built with all the predictors presented here. If you are not sure what I’m talking about, take a look at the Part 1 episode where I introduced R Squared.
+
+Now, the thing about R Squared is that it always increases when you add more predictor variables regardless of whether the added variables are meaningful in terms of explaining the changes in the target variable or not. So even when adding variables that are not meaningful we are not sure if the model quality is really getting improved or not.
+And this can cause something called Overfitting, which happens when you build a prediction model that performs great with the training data but not with the real world data.
+Adjusted R Squared and AIC
+So, we want the measures that can tell us if we are adding or removing meaningful predictors. This is when the metrics like Adjusted R Squared and AIC become helpful.
+Unlike R Squared, Adjusted R Squared doesn’t get better by just adding any variables. It penalizes for adding more variables so that it increases only when meaningful variables are added. If an added variable is not meaningful Adjusted R Squared would stay the same or decrease.
+AIC (Akaike Information Criterion) is often used as a helpful measure to build models with fewer predictors while maintaining the prediction quality. The smaller the AIC value is the better the model is.
+Now, this model without Month shows Adjusted R Squared as 0.29782851888, which is a tiny bit bigger than 0.2978245359 from the last model with Month. And AIC without Month is about 366,547, and it’s slightly smaller than 366,548 from the last model with Month.
+So we can remove Month variable from the predictors not just because its P-Value is large, but also it doesn’t help explain the changes in Gestation Week.
+How about Removing State?
+When you look at the coefficient table, you would notice that State related variables (e.g. State — Ohio, State — Illinois, etc.) have higher P Values.
 
 
+The idea of Gestation Week being different depending on which U.S. states you are born sounds kind of interesting. But does that really matters?
+Let’s try removing State variable from the predictors and re-build the model.
+Here is the model quality under Summary.
+
+
+This model without State shows Adjusted R Squared as 0.29237787951, which is a bit smaller than the last one (0.29782851888). And AIC is about 367,211, which is a bit bigger than the last one (366,547). So, although some of the US States don’t have statistically significant influences on Gestation Week, thanks to other states like New York, Pennsylvania, Virginia, adding State variable to the model helps to explain the changes in Gestation Week better.
+I’m highlighting the ‘dummy’ variables of US States that are statistically significant and can influence on Gestation Week.
+
+
+In Exploratory, a categorical variable gets automatically transformed to have only the first 12 most frequent unique values and the rest become ‘Others’ by default
+So it will become something like the chart below.
+
+
+Now, State variable is categorical (character data type), which means that each ‘dummy’ variable needs to be interpreted in a comparison to the base level. If you’re not clear, take a look at Part 3 of this series where I explained how to interpret the coefficients for the categorical variables.
+A Beginner’s Guide to EDA with Linear Regression — Part 3
+
+How to Interpret Coefficients of Categorical Variables
+blog.exploratory.io
+
+Base Level for State
+Now, what is the base level for this model?
+We can find that out under Summary tab.
+
+
+It is Arizona, and this is because it happens to be the first unique value in an alphabetical order. So each state is compared to Arizona in terms of how it is influencing Gestation Week.
+Note that from Exploratory v4.3 the most frequent category becomes the base level. For example, with this data California would be the base level since it has the most entries.
+We can use Bar chart to visualize the difference between Arizona and other States for their average Gestation Week like below.
+
+
+The red dotted line shows Arizona’s average Gestation Week. As we can see California, Michigan, New York, Pennsylvania, Virginia shows longer Gestation Week compared to Arizona.
+But by building Linear Regression with all the other predictors, we can conclude that only New York, Pennsylvania, and Virginia are the only states that are statistically significant when all the other variables stay the same.
+
+
+Of course, you can change the base level to some other states that you are more familiar with as we have done in Part 3 if you like.
+A Beginner’s Guide to EDA with Linear Regression — Part 3
+
+How to Interpret Coefficients of Categorical Variables
+blog.exploratory.io
+
+Conclusion
+We have learned that Month doesn’t add a value to the model in terms of explaining the changes in Gestation Week while State contributes increasing the explainability of the model for the changes in Gestation Week. When we were deciding which variables to be included or excluded in the model, we not only looked at P-Value for each variable but also evaluated some of the model metrics like Adjusted R Squared and AIC to see if they are valuable to be added in the model.
+Now, when you look at the coefficient in the chart above you would notice that Weight Pound variable has the highest coefficient value (the most left hand side). But isn’t that kind of obvious that Weight Pound and Gestation Week are related? You will get a lighter weight baby if she/he is born earlier and you will get a heavier baby if she/he is born later.
+In the next episode, I’m going to talk about how to deal with the variables that are correlated to one another. Such correlation can happen between the target variable and the predictor variable. Also, it can happen among the predictor variables. This latter case is specifically called as ‘Multi Collinearity’
 
  https://www.r-bloggers.com/analysis-of-covariance-–-extending-simple-linear-regression/

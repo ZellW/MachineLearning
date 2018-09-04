@@ -1,0 +1,277 @@
+---
+title: 'Using the BreakDown Package'
+output:
+    rmdformats::readthedown:
+      highlight: pygments
+      code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;
+}
+body{ /* Normal  */
+   font-size: 14px;
+}
+td {  /* Table  */
+   font-size: 12px;
+}
+h1 { /* Header 1 */
+font-size: 26px;
+color: #4294ce;
+}
+h2 { /* Header 2 */
+font-size: 22px;
+}
+h3 { /* Header 3 */
+font-size: 18px;
+}
+code.r{ /* Code block */
+  font-size: 12px;
+}
+pre { /* Code block */
+  font-size: 12px
+}
+#table-of-contents h2 {
+background-color: #4294ce;
+}
+#table-of-contents{
+background: #688FAD;
+}
+#nav-top span.glyphicon{
+color: #4294ce;
+}
+#postamble{
+background: #4294ce;
+border-top: ;
+}
+</style>
+
+# Introduction
+
+`breakDown` prcreates model agnostic waterfall charts to make model results more interprettable.
+
+The idea behind Break Down Plots it to decompose model prediction for a *single observation*. 
+
+Plots will work for binary classifiers and general regression models. 
+
+# Load Libraries
+
+```{r loadLibs1, warning=FALSE, message=FALSE}
+#if(!require(breakDown)){devtools::install_github("pbiecek/breakDown")}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr","dplyr","ggplot2", "readr", "tidyr", "gridExtra", "stringr", "lubridate", 
+        "caret", "gbm", "modelr", "ggthemes", "breakDown", prompt = FALSE)
+
+options(scipen = 999)#Do not display exponents
+```
+
+# Get Data
+
+`HR_Data` is now included in the `breakDown` package.
+
+```{r}
+head(HR_data, 3)
+```
+
+# breakDown Examples
+
+## randomForest
+
+```{r message=FALSE}
+library("randomForest")
+model_rf <- randomForest(factor(left)~., data = HR_data, family = "binomial", maxnodes = 5)
+
+predict.function <- function(model_rf, new_observation) 
+predict(model_rf, new_observation, type="prob")[,2]
+predict.function(model_rf, HR_data[11,-7])
+```
+```{r}
+explain_rf <- broken(model_rf, HR_data[11,-7], data = HR_data[,-7], predict.function = predict.function, 
+                    direction = "down")
+explain_rf
+```
+```{r}
+plot(explain_rf) + ggtitle("breakDown plot  (direction=down) for randomForest model")
+```
+
+```{r}
+explain_2 <- broken(model_rf, HR_data[11,-7], data = HR_data[,-7],
+                    predict.function = predict.function, direction = "up")
+
+plot(explain_2) + ggtitle("breakDown plot (direction=up) for randomForest model")
+```
+
+## ranger Example
+
+Now let’s create a ranger classification forest for churn, the left variable.
+
+```{r message=FALSE}
+library(ranger)
+HR_data$left <- factor(HR_data$left)
+model_ranger <- ranger(left ~ ., data = HR_data, importance = 'impurity', probability=TRUE, min.node.size = 2000)
+
+predict.function <- function(model_ranger, new_observation) 
+predict(model_ranger, new_observation, type = "response")$predictions[,2]
+
+predict.function(model_ranger, HR_data[11,])
+```
+```{r}
+explain_ranger <- broken(model_ranger, HR_data[11,-7], data = HR_data[,-7],
+                    predict.function = predict.function, direction = "down")
+explain_ranger
+```
+```{r}
+plot(explain_ranger) + ggtitle("breakDown plot  (direction=down) for ranger model")
+```
+
+## GLM Logistic Example
+
+```{r}
+model_glm <- glm(left~., data = HR_data, family = "binomial")
+
+predict(model_glm, HR_data[11,], type = "link")
+```
+```{r}
+explain_glm <- broken(model_glm, HR_data[11,])
+explain_glm
+```
+```{r}
+plot(explain_glm) + ggtitle("breakDown plot for linear predictors")
+```
+
+## Linear Regression
+
+```{r}
+wine <- read.table("./data/winequality-white.csv", header = T, sep=";")
+head(wine, 3)
+```
+```{r}
+model_lm <- lm(quality ~ fixed.acidity + volatile.acidity + citric.acid + residual.sugar + 
+            chlorides + free.sulfur.dioxide + total.sulfur.dioxide + density + pH + sulphates + alcohol,
+            data = wine)
+new_observation <- wine[1,]
+br <- broken(model_lm, new_observation)
+br
+```
+```{r}
+plot(br)
+```
+
+## SVM Example
+
+SVM using `kernlab` and `e1071` packages.
+
+```{r message=FALSE}
+library(kernlab)
+
+wine_svm_model_kern <- ksvm(quality~., data = wine)
+wine_svm_model_kern
+```
+```{r}
+library(e1071)
+
+wine_svm_model_e <- svm(quality~., data = wine)
+wine_svm_model_e
+```
+
+Now we are ready to call the `broken()` function. Since `kernlab` is using S4 methods we need to pass the hook to `kernlab:::predict` method.
+
+```{r}
+nobs <- wine[5, , drop = FALSE]
+base_prediction1 <- predict(wine_svm_model_kern, nobs)
+set.seed(1313)
+
+explain_5_kern <- broken(wine_svm_model_kern, new_observation = nobs, 
+                    data = wine, predict.function = predict,
+                    baseline = "intercept", direction = "up")
+explain_5_kern
+```
+```{r}
+plot(explain_5_kern) + ggtitle(paste0("Prediction for SVM kernLab model ", round(base_prediction1, 3)))
+```
+
+```{r}
+base_prediction2 <- predict(wine_svm_model_e, nobs)
+set.seed(1313)
+
+explain_5_e <- broken(wine_svm_model_e, new_observation = nobs, 
+                    data = wine, predict.function = predict,
+                    baseline = "intercept", direction = "up")
+explain_5_e
+```
+```{r}
+plot(explain_5_e) + ggtitle(paste0("Prediction for SVM e1071 model ", round(base_prediction2, 3)))
+```
+
+## xgBoost Example
+
+```{r message=FALSE}
+library(xgboost)
+
+model_matrix_train <- model.matrix(left ~ . - 1, HR_data)
+data_train <- xgb.DMatrix(model_matrix_train, label = as.numeric(HR_data$left))
+param <- list(objective = "reg:linear")
+
+HR_xgb_model <- xgb.train(param, data_train, nrounds = 50)
+HR_xgb_model
+```
+```{r eval=FALSE}
+nobs <- model_matrix_train[1L, , drop = FALSE]
+
+explain_xgb <- broken(HR_xgb_model, new_observation = nobs, data = model_matrix_train)#require breakDown 0.15 or higher
+explain_xgb
+```
+
+```{r eval=FALSE}
+plot(explain_xgb) + ggtitle("breakDown plot for xgboost model")
+```
+
+
+##caret Model Example
+
+This uses a GLM inside `caret`.
+
+```{r}
+library(caret)
+
+set.seed(2)
+training <- twoClassSim(50, linearVars = 2)
+#twoClassSim simulates regression and classification data with truly important predictors and irrelevant predictions
+trainX <- training[, -ncol(training)]
+trainY <- training$Class
+
+head(training)
+```
+
+```{r}
+cctrl1 <- trainControl(method = "cv", number = 3, returnResamp = "all",
+                       classProbs = TRUE, summaryFunction = twoClassSummary)
+
+test_class_cv_model <- train(trainX, trainY, method = "glm", trControl = cctrl1,
+                             metric = "ROC", preProc = c("center", "scale"))
+test_class_cv_model
+```
+
+To use `breakDown` need a function that calculates scores/predictions for a single observation. By default the `predict()` returns predicted class.
+
+Add `type = "prob"` argument to get scores. And since there will be two scores for each observarion we need to extract one of them.
+
+```{r}
+predict.fun <- function(model, x) predict(model, x, type = "prob")[,1]
+testing <- twoClassSim(10, linearVars = 2)
+predict.fun(test_class_cv_model, testing[1,])
+```
+
+```{r}
+library("breakDown")
+explain_caret <- broken(test_class_cv_model, testing[1,], data = trainX, predict.function = predict.fun)
+explain_caret
+```
+
+```{r}
+plot(explain_caret) + ggtitle("breakDown plot for caret/glm model")
+```
+
+
