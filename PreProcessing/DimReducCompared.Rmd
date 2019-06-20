@@ -1,0 +1,295 @@
+---
+title: "Dimensionality Reduction Comparison"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+#devtools::install_github("jlmelville/vizier")
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "Rtsne", "vizier", "uwot",  prompt = F)
+set.seed(123)
+```
+
+# Introduction
+
+Dimension reduction is the task of finding a low dimensional representation of high dimensional data. This has uses as a visualization technique (by reducing to 2 or 3 dimensions), and as a pre-processing step for further machine learning tasks, such as clustering, or classification. This document provides an overview of different approaches to dimension reduction, looking at more recent approaches like PCA and t-SNE before introducing a new algorithm called UMAP.
+
+The problem nowadays is that most datasets have a large number of variables. In other words, they have a high number of dimensions along which the data is distributed. Visually exploring the data can then become challenging and most of the time even practically impossible to do manually. However, such visual exploration is incredibly important in any data-related problem. Therefore it is key to understand how to visualize high-dimensional datasets. This can be achieved using techniques known as dimensionality reduction. 
+
+Here are some of the benefits of applying dimensionality reduction to a dataset:
+
+- Space required to store the data is reduced as the number of dimensions comes down
+- Less dimensions lead to less computation/training time
+- Some algorithms do not perform well when we have a large dimensions. So reducing these dimensions needs to happen for the algorithm to be useful
+- It takes care of multicollinearity by removing redundant features. For example, you have two variables – ‘time spent on treadmill in minutes’ and ‘calories burnt’. These variables are highly correlated as the more time you spend running on a treadmill, the more calories you will burn. Hence, there is no point in storing both as just one of them does what you require
+- It helps in visualizing data. It is very difficult to visualize data in higher dimensions so reducing our space to 2D or 3D may allow us to plot and observe patterns more clearly
+
+There are three dimensionality reductions techniques explored herein:
+
+1. __PCA__: PCA is a technique for reducing the number of dimensions in a dataset whilst retaining most information. It is using the correlation between some dimensions and tries to provide a minimum number of variables that keeps the maximum amount of variation or information about how the original data is distributed. principal components are linear combination of the original variables which capture the variance in the data set. 
+     - The first principal component captures the highest amount of variability. The larger this variability is, the more information is contained in it. In geometric terms, it describes a line which is closest to the data and thus minimizes the sum of squared distance between all data points and the line. The second principal component capture the remaining variability in a similar way. The more of the total variability is captured by these two components, the more information does the scatterplot of these vectors contain.
+2. __t-SNE__: t-SNE stands for t-distributed stochastic neighbor embedding and was introduced in 2008. Non-technically, the algorithm is in fact quite simple. t-SNE is a non-linear dimensionality reduction algorithm that seeks to finds patterns in the data by identifying clusters based on similarity of data points. _Note that this does not make it a clustering algorithm_. It is only a dimensionality reduction algorithm. Nonetheless, the results can be quite impressive and in many cases are superior to a PCA. 
+     - The t-SNE algorithm is implemented in `Rtsne.` To run it, several hyper parameters have to be set. The two most important ones are `perplexity` and max_iter. While the latter should be self-explanatory, the second is not. Perplexity roughly indicates how to balance local and global aspects of the data. The parameter is an estimate for the number of close neighbors for each point. The original authors state, that “The performance of SNE is fairly robust to changes in the perplexity, and typical values are between 5 and 50.”
+3. __UMAP__:  UMAP (Uniform Manifold Approximation and Projection) is a novel manifold learning technique for dimension reduction. UMAP is constructed from a theoretical framework based in Riemannian geometry and algebraic topology. The result is a practical scalable algorithm that applies to real world data. The UMAP algorithm is competitive with t-SNE for visualization quality, and arguably preserves more of the global structure with superior run time performance. Furthermore, UMAP has no computational restrictions on embedding dimension, making it viable as a general purpose dimension reduction technique for machine learning. 
+     - There are two implementations of the UMAP algorithm. The default implementation is one written in R and Rcpp. This implementation follows the original python code. The implementation has minimal dependencies and should work on most platforms. A second implementation is a wrapper for the python package. This offers similar functionality to another existing package __umapr.__ To use this implementation, additional installation steps are required; see documentation for the python package for details.
+     - __uwot__ is an R implementation of the Uniform Manifold Approximation and Projection (UMAP) method for dimensionality reduction that also implements the supervised and metric (out-of-sample) learning extensions to the basic method. __uwot will he used in this document__.
+          -  __umapr__ wraps the Python implementation of UMAP to make the algorithm accessible from within R. It uses the great reticulate package.
+          - __UMAP__ and __uwot__ provide more features than __umapr__ and are more actively developed. 
+
+# Recommendation
+
+Try all three methods to determine the best for your specific use case.  After all, it is not too hard to try all three - you might be missing a great opportunity to improve your model performance.
+
+## Compare
+
+### Principal Component Analysis
+Pros:
+  - Relatively computationally cheap.
+  - Can save embedding model to then project new data points into the reduced space.
+Cons:
+  -Linear reduction limits information that can be captured; not as discriminably clustered as other algorithms.
+  - Not great results when outliers, skewed distributions and dummy variables present
+
+### t-Distributed stochastic neighbor embedding
+Pros:
+- Produces highly clustered, visually striking embeddings.
+- Non-linear reduction, captures local structure well.
+Cons:
+- Global structure may be lost in favor of preserving local distances.
+- More computationally expensive.  Because t-SNE scales quadratically in the number of objects N, its applicability is limited to data sets with only a few thousand input objects; beyond that, learning becomes too slow to be practical (and the memory requirements become too large).
+- Requires setting hyperparameters that influence quality of the embedding.
+- Non-deterministic algorithm.
+
+### Uniform manifold approximation and projection
+Pros:
+- Non-linear reduction that is computationally faster than t-SNE.
+- User defined parameter for preserving local or global structure.
+- Solid theoretical foundations in manifold learning.
+Cons:
+- New, less prevalent algorithm.
+- Requires setting hyperparameters that influence quality of the embedding.
+- Non-deterministic algorithm.
+- For high dimensional datasets (> 100-1000 columns) using PCA to reduce dimensionality is highly recommended to avoid the nearest neighbor search taking a long time. Keeping only 50 dimensions can speed up calculations without affecting the visualization much
+
+## Other Dimensionality Reduction Techniques
+
+A self-organizing map (__SOM__) is an artificial neural network that is trained using unsupervised learning.
+A SOM is made up of multiple “nodes”, where each node vector has the following properties.
+
+- A fixed position on the SOM grid.
+- A weight vector of the same dimension as the input space.
+- Associated data points. Each data point is mapped to a node on the map grid.
+
+The key feature of SOMs is that the topological features of the input data are preserved on the map. (It maps data into 2 dimensions and then performs clustering.)
+
+These too can also be used to reduce dimensionality:
+
+- Missing Value Ratio
+- Low Variance Filter
+- High Correlation Filter
+- Random Forest
+- Backward Feature Elimination
+- Forward Feature Selection
+- Factor Analysis
+- Independent Component Analysis
+- Methods Based on Projections
+
+See https://www.analyticsvidhya.com/blog/2018/08/dimensionality-reduction-techniques-python/
+
+# Get Data
+
+Famous MNIST data:
+
+The data files train.csv and test.csv contain gray-scale images of hand-drawn digits, from zero through nine.
+Each image is 28 pixels in height and 28 pixels in width, for a total of 784 pixels in total. Each pixel has a single pixel-value associated with it, indicating the lightness or darkness of that pixel, with higher numbers meaning darker. This pixel-value is an integer between 0 and 255, inclusive.
+
+The training data set, (train.csv), has __785 columns__. The first column, called "label", is the digit that was drawn by the user. The rest of the columns contain the pixel-values of the associated image.
+
+```{r message=FALSE}
+# https://www.kaggle.com/puyokw/clustering-in-2-dimension-using-tsne/data
+train <- read_csv("../../LargeDataFiles/DimReduction/train.csv")
+test <- read_csv("../../LargeDataFiles/DimReduction/test.csv")
+train$label <- as.factor(train$label)
+```
+
+Reduce data to save time
+
+```{r}
+numTrain <- 10000
+set.seed(1)
+rows <- sample(1:nrow(train), numTrain)
+train <- train[rows,]
+```
+
+# Methods Compared
+## t-SNE
+
+```{r}
+# using tsne
+set.seed(1) # for reproducibility
+tsne <- Rtsne(train[,-1], dims = 2, perplexity=30, verbose = getOption("verbose", FALSE), max_iter = 500)
+# perplexity is related to the importance of neighbors:
+#  "It is comparable with the number of nearest neighbors k that is employed in many manifold learners."
+#  "Typical values for the perplexity range between 5 and 50"
+
+colors = rainbow(length(unique(train$label)))
+names(colors) = unique(train$label)
+{plot(tsne$Y, t='n', main="tsne")
+text(tsne$Y, labels=train$label, col=colors[train$label])}
+```
+
+## PCA
+
+```{r}
+pca = princomp(train[,-1])$scores[,1:2]
+{plot(pca, t='n', main="pca")
+text(pca, labels=train$label,col=colors[train$label])}
+
+# Generate output files with write_csv(), plot() or ggplot()
+# Any files you write to the current directory get shown as outputs
+```
+
+## UMAP
+
+Since UMAP is relatively new, a discussion follows the UMAP comparison with PCA and t-SNE.
+
+> Use vizier to visualize umap data.  Can also be used to simplify visualizing other reduction methods too.
+
+```{r}
+train_map <- umap(train, n_neighbors = 30, learning_rate = 0.5, fast_sgd = TRUE)
+embed_plot(train_map, train, cex = 0.5, title = "umap Visualization", alpha_scale = 0.09)
+```
+
+### UMAP Discussion
+
+The default approach of UMAP is that all data be numeric and will treated as one block using the Euclidean distance metric. To use a different metric, set the metric parameter, e.g. metric = "cosine".
+
+Supervised UMAP allows for a factor column to be used. You may  also specify factor columns in the X data. Use the special metric name "categorical". For example, to use the `Species` factor in standard UMAP for iris along with the usual four numeric columns, use:
+
+`metric = list("euclidean" = 1:4, "categorical" = "Species")`
+
+Factor columns are treated differently from numeric columns.  They are always treated separately, one column at a time. If you have two factor columns, cat1, and cat2, and you would like them included in UMAP, you write:
+
+`metric = list("categorical" = "cat1", "categorical" = "cat2", ...)`
+
+As a convenience, you can also write:
+
+`metric = list("categorical" = c("cat1", "cat2"), ...)`
+
+but that doesn't combine `cat1` and cat2 `into` one block, just saves some typing.
+
+Because of the way categorical data is intersected into a simplified set, you cannot have an X metric that specifies only categorical entries. You must specify at least one of the standard Annoy metrics for numeric data. For iris, the following is an error:
+
+```{r eval=FALSE}
+# wrong and bad
+metric = list("categorical" = "Species")
+```
+
+Specifying some numeric columns is required:
+
+```{r eval=FALSE}
+# OK
+`metric = list("categorical" = "Species", "euclidean" = 1:4)`
+```
+
+Factor columns not explicitly included in the metric are removed as usual.
+
+Categorical data does not appear in the model returned when `ret_model = TRUE` and so does not affect the project of data used in `umap_transform`. You can still use the UMAP model to project new data, but factor columns in the new data are ignored (effectively working like supervised UMAP).
+
+### UMAP Supervised Clustering
+
+UMAP can use a label and reduce dimensionality to uncover new insights.  Use the diamonds dataset to develop a simple example.
+
+```{r}
+glimpse(diamonds)
+```
+
+There are 10 variables associated with each diamond: five numeric values related to the geometry of the diamonds (table, x,  y, z and depth), three factors that measure the quality of the diamond (cut, color and clarity), and the price in dollars. The price is selected as the target vector, leaving the other nine variables to be used for the dimensionality reduction.
+
+uwot’s implementation of UMAP uses all numeric columns in can find in its calculations, so to avoid including the price in the non-supervised part of UMAP, let’s create a new data frame, initially with the geometric data:
+
+```{r}
+dia <- diamonds[, c("carat", "x", "y", "z", "table")]
+```
+
+The depth column is related to x, y and z so it is not included.
+
+Additionally, `cut`, `color` and `clarity` are ordinal variables. Convert these to a numeric scale:
+
+```{r}
+dia$cut <- as.numeric(diamonds$cut)
+dia$color <- as.numeric(diamonds$color)
+dia$clarity <- as.numeric(diamonds$clarity)
+glimpse(dia)
+```
+
+First look at some standard unsupervised results. For starters, here’s a plot of the first two principal components, using the `irlba`:
+
+```{r}
+dia_pca <- irlba::prcomp_irlba(dia, n = 2, scale. = TRUE)
+vizier::embed_plot(dia_pca$x, diamonds$price, title = "Diamonds PCA", 
+                   color_scheme = "RColorBrewer::Spectral", alpha_scale = 0.1, cex = 0.5, pc_axes = TRUE)
+```
+
+Because the different columns have different units and meaning, scale. = TRUE used to equalize variances. Red indicates a low price and blue a high price. Despite the majority of the dataset being clumped together, the progression of prices from low to high is pretty well captured with two components.
+
+Evaluate what UMAP does with it. Like with PCA, the columns are all scaled to have equal variance (`scale = TRUE`):
+
+```{r}
+dia_umap <- umap(dia, scale = TRUE, verbose = FALSE)
+vizier::embed_plot(dia_umap, diamonds$price, title = "Diamonds UMAP", 
+                   color_scheme = "RColorBrewer::Spectral", alpha_scale = 0.1, cex = 0.5, pc_axes = TRUE)
+```
+
+The high price diamonds are clumped together in their own clusters in the middle of the plot. A better plot is initialized with PCA:
+
+```{r}
+dia_umap_from_pca <- umap(dia, scale = TRUE, verbose = TRUE, init = dia_pca$x)
+vizier::embed_plot(dia_umap_from_pca, diamonds$price, title = "Diamonds UMAP (PCA init)", 
+                   color_scheme = "RColorBrewer::Spectral", alpha_scale = 0.1, cex = 0.5, pc_axes = TRUE)
+```
+
+This maintains the global structure of the PCA result. Rather than have to separately create the PCA, use  `init = "pca"` and get the same results (`uwot` uses `irlba` internally for this, so there’s no loss of speed).
+
+Supervised result - results are not affected by the choice of initialization,so for simplicity just use the standard spectral initialization:
+
+```{r}
+dia_sumap <- umap(dia, scale = TRUE, verbose = FALSE, y = diamonds$price)
+vizier::embed_plot(dia_sumap, diamonds$price, title = "Diamonds Supervised UMAP", 
+                   color_scheme = "RColorBrewer::Spectral", alpha_scale = 0.1, 
+                   cex = 0.5, pc_axes = TRUE)
+```
+
+The embedding is now even more well-organized along the price of the diamonds.
+
+There is a visible gap between the lowest price diamonds and the rest of the embedding. If you increase   `n_epochs` and allow the optimization to proceed, this gap increases substantially, making the plot harder to read. Adjusting `n_epochs` along with the `target_n_neighbors` and `target_weight` parameters may be required to strike the right balance. 
+
+# Dim Reduction v Clustering
+
+## Dimensionality Reduction:
+
+In machine learning and statistics, dimensionality reduction or dimension reduction is the process of reducing the number of random variables under consideration, and can be divided into feature selection and feature extraction.
+
+A data may be dimensionality reduced before a clustering algorithm is applied.
+
+## Clustering:
+
+Cluster analysis or clustering is the task of grouping a set of objects in such a way that objects in the same group (called a cluster) are more similar (in some sense or another) to each other than to those in other groups (clusters).
+
+In high dimensional space, all the data points become equidistant.  Therefore, they may be benefits in applying PCA, t-SNE or UMAP prior to clustering.
+

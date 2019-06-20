@@ -1,0 +1,1 @@
+udpipe_2.5M <- udpipe_df[2000001:2500000,] %>% mutate(lang = ifelse(textcat(sentence) == 'english', 1, 0))

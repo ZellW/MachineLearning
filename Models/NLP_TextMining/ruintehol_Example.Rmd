@@ -1,0 +1,149 @@
+---
+title: "ruintehol Example"
+author: "Cliff W."
+date: "4/23/2019"
+output:
+  html_document:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_float:
+      collapsed: false
+      smooth_scroll: false
+    toc_depth: 2
+    fig_caption: false
+---
+
+```{r}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "ruimtehol", prompt = T)
+```
+
+# Introduction
+
+This R package is a wrapper around Starspace which provides a neural embedding model for doing the following on text:
+
+- Text classification
+- Learning word, sentence or document level embeddings
+- Finding sentence or document similarity
+- Ranking web documents
+- Content-based recommendation (e.g. recommend text/music based on the content)
+- Collaborative filtering based recommendation (e.g. recommend text/music based on interest)
+- Identification of entity relationships
+
+The list of R packages regarding text mining with R provided by BNOSAC has been steadily growing. This is the list of R packages maintained by BNOSAC.
+
+- __udpipe__: tokenisation, lemmatisation, parts of speech tagging, dependency parsing, morphological feature extraction, sentiment scoring, keyword extraction, NLP flows
+- __crfsuite__: named entity recognition, text classification, chunking, sequence modelling
+- __textrank__: text summarisation
+- __ruimtehol__: text classification, word/sentence/document embeddings, document/label similarities, ranking documengs, content based recommendation, collaborative filtering-based recommendation
+
+# Example
+
+Below is an example how the package can be used for multi-label classification on questions asked in Belgian parliament. Each question in parliament was labelled with several of one of the 1785 categories.
+
+```{r}
+data(dekamer, package = "ruimtehol")
+
+glimpse(dekamer)
+class(dekamer)
+```
+
+Each question in parliament was labelled with more than 1 category. There are 1785 categories in this dataset
+
+Split up `question_theme.`  Create new new variable `question_themes` - plural.
+
+```{r}
+dekamer$question_themes <- strsplit(dekamer$question_theme, " +\\| +")# Finds spaced between wrds in a sentence
+glimpse(dekamer)
+head(dekamer$question_themes, 5)
+```
+
+Plain text of the question in parliament
+
+```{r}
+head(dekamer$question, 2)
+dekamer$text <- strsplit(dekamer$question, "\\W") # Do a global search for non-word characters in a string
+head(dekamer$question, 2)
+```
+
+```{r}
+dekamer$text <- sapply(dekamer$text, FUN=function(x) paste(x, collapse = " "))
+dekamer$text <- tolower(dekamer$text)
+head(dekamer$text, 2)
+```
+
+# Build starspace model
+```{r}
+
+model <- embed_tagspace(x = dekamer$text, 
+                        y = dekamer$question_themes, 
+                        dim = 50, 
+                        ngram = 3, loss = "hinge", similarity = "cosine", adagrad = TRUE,
+                        early_stopping = 0.8, minCount = 2, 
+                        thread = 4)
+plot(model)
+```
+
+Get embeddings of the dictionary of words as well as the categories
+```{r}
+embedding_words  <- as.matrix(model, type = "words")
+embedding_labels <- as.matrix(model, type = "label")
+```
+
+```{r}
+## Find closest labels / predict
+embedding_combination <- starspace_embedding(model, "federale politie patrouille", type = "document")
+embedding_similarity(embedding_combination, embedding_labels, top_n = 3)
+```
+
+```{r}
+predict(model, "de migranten komen naar europa, in asielcentra ...")
+
+#$input
+"de migranten komen naar europa, in asielcentra ..."
+#$prediction
+```
+
+```{r}
+dekamer$x <- strsplit(dekamer$question, "\\W")
+glimpse(dekamer)
+```
+```{r}
+dekamer$x <- sapply(dekamer$x, FUN = function(x) paste(setdiff(x, ""), collapse = " "))
+glimpse(dekamer)
+```
+```{r}
+dekamer$x <- tolower(dekamer$x)
+dekamer$y <- strsplit(dekamer$question_theme, split = ",")
+head(dekamer$y, 5)
+```
+```{r}
+dekamer$y <- lapply(dekamer$y, FUN=function(x) gsub(" ", "-", x))
+head(dekamer$y, 5)
+```
+```{r}
+set.seed(123456789)
+model <- embed_tagspace(x = dekamer$x, y = dekamer$y,
+                        dim = 50, 
+                        lr = 0.01, epoch = 40, loss = "softmax", adagrad = TRUE, 
+                        similarity = "cosine", negSearchLimit = 50,
+                        ngrams = 2, minCount = 2)
+plot(model) 
+```
+
+```{r}
+text <- c("de nmbs heeft het treinaanbod uitgebreid via onteigening ...",
+          "de migranten komen naar europa de asielcentra ...")                   
+predict(model, text, k = 3)  
+predict(model, "koning filip", k = 10, type = "knn")
+predict(model, "koning filip", k = 10, type = "embedding")
+```
+
+Reference
+
+https://www.r-bloggers.com/starspace-for-nlp-nlproc/

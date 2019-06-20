@@ -1,0 +1,204 @@
+---
+title: 'Ordinal Logistic Regression'
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+#table-of-contents h2 {
+  background-color: #4294ce;}
+#table-of-contents{
+  background: #688FAD;}
+#nav-top span.glyphicon{
+  color: #4294ce;}
+#postamble{
+  background: #4294ce;
+  border-top: ;}
+</style>
+
+```{r echo=FALSE, warning=F, message=F}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "MASS", "effects", "car", "foreign", "splines",  prompt = TRUE)
+options(digits = 3)
+
+setwd("~/GitHub/MachineLearning/Models/LogisticRegression")
+```
+
+# Introduction
+
+Ordinal logistic regression is a widely used classification method, with applications in variety of domains. This method is the go-to tool when there is a natural ordering in the dependent variable. For example, dependent variable with levels low, medium, high is a perfect context for application of logistic ordinal regression. 
+
+Having wide range of applicability, ordinal logistic regression is considered as one of the most admired methods in the field of data analytics. The method is also known as proportional odds model because of the transformations used during estimation and the log odds interpretation of the output. 
+The document outline is:
+
+- Provide a quick review of ordinal logistic regression. 
+- Introduce the steps to perform ordinal logistic regression. This also covers the basics of interpretation and evaluation of the model
+- Demonstrate a more intuitive way to interpret the model.
+
+# Ordinal Logistric Regression
+
+Ordinal logistic regression is an extension of simple logistic regression model. In simple logistic regression, the dependent variable is _categorical_ and follows a Bernoulli distribution. Whereas, in ordinal logistic regression the dependent variable is _ordinal_ i.e. there is an explicit ordering in the categories. For example, during preliminary testing of a pain relief drug, the participants are asked to express the amount of relief they feel on a five point Likert scale. Another common example of an ordinal variable is app ratings. On google play, customers are asked to rate apps on a scale ranging from 1 to 5. Ordinal logistic regression becomes handy in the aforementioned examples as there is a clear order in the categorical dependent variable.
+
+In simple logistic regression, log of odds that an event occurs is modeled as a linear combination of the independent variables.This approach of modeling ignores the ordering of the categorical dependent variable. Ordinal logistic regression model overcomes this limitation by using cumulative events for the log of the odds computation. It means that unlike simple logistic regression, _ordinal logistic models consider the probability of an event and all the events that are below the focal event in the ordered hierarchy_. For example, the event of interest in ordinal logistic regression would be to obtain an app rating equal to X or less than X.  For example, the log of odds for the app rating less than or equal to 1 would be computed as follows:
+
+$LogOdds_{rating < 1} = Log (p(rating = 1)/p(rating > 1)$  [Eq. 1]
+
+Likewise, the log of odds can be computed for other values of app ratings.  The computations for other ratings are below:
+
+$LogOdds_{} rating<2} = Log (p(rating<=2)/p(rating>2)$  [Eq. 2]
+
+$LogOdds_{rating<3} = Log (p(rating<=3)/p(rating>3)$  [Eq. 3]
+
+$LogOdds_{rating<4} = Log (p(rating=4)/p(rating>4)$  [Eq. 4]
+
+Because all the ratings below the focal score are considered in computation, the highest app rating of 5 will include all the ratings below it and does not have a log of odds associated with it. In general, the ordinal regression model can be represented using the LogOdds computation.
+
+$Logodds_Y = αi+ β_1X_1 +β_2X_2 +….. +β_nX_n$
+
+where,
+
+- Y is the ordinal dependent variable
+- i is the number of categories minus 1
+- X~1, X~2,…. X~n  are independent variables. They can be measured on nominal, ordinal or continuous measurement scale.
+- β~1, β~2,… β~n are estimated parameters
+
+For i ordered categories, we obtain `i – 1` equations. The proportional odds assumption implies that the effect of independent variables is identical for each log of odds computation. But, this is not the case for intercept  as the intercept takes different values for each computation. Besides the proportional odds assumption, the ordinal logistic regression model assumes an ordinal dependent variable and absence of multicollinearity. Absence of multicollinearity means that the independent variables are not significantly correlated. These assumptions are important as their violation makes the computed parameters unacceptable.
+
+# Modeling
+
+Use a simulated dataset for analysis. The [data](https://r-posts.com/wp-content/uploads/2018/12/data.txt) is in .csv format and can be downloaded. The details of the variables are as follows. 
+
+__Objective__ of the analysis is to predict the likelihood of each level of customer purchase. 
+__Dependent variable__ is the likelihood of repeated purchase by customers. 
+__Variable__ is measured in an ordinal scale and can be equal to one of the three levels – low probability, medium probability, and high probability. 
+__Independent variables__ are measures of possession of coupon by the focal customer, recommendation received by the peers and quality of the product. 
+__Possession__ of coupon and peer recommendation are categorical variables, while quality is measured on a scale of 1 to 5. 
+
+
+The first step is to explicitly define the ordering of the levels in  the dependent variable and the relevant independent variables. This step is crucial and ignoring it can lead to meaningless analysis.
+
+```{r}
+#Read data file from UCL mAchine learning repository  
+data <- read.table("../data/OrdinalLogisticRegression.txt")
+head(data)
+```
+```{r}
+#Ordering the dependent variable
+data$rpurchase = factor(data$rpurchase, 
+                        levels = c("low probability", "medium probability", "high probability"), ordered = TRUE) 
+data$peers = factor(data$peers, levels = c("0", "1"), ordered = TRUE) 
+data$coupon = factor(data$coupon, levels = c("0", "1"), ordered = TRUE) 
+```
+
+Like always, it is essential to perform EDA. Observe the count of data for ordinal variables and distribution characteristics for other variables.  Compute the count of `rpurchase` with different values of `coupon.` Note that the median value for `rpurchase` changes with change in `coupon.` The median level of `rpurchase` increases, indicating that coupon positively affects the likelihood of repeated purchase.
+
+```{r}
+#Summarizing the data
+summary(data)
+```
+```{r}
+#Making frequency table
+table(data$rpurchase, data$coupon)
+```
+
+After defining the order of the levels in the dependent variable and performing exploratory data analysis, the data is ready to be partitioned into training and testing set. Build the model using the training set and validate the computed model using the data in test set. The partitioning of the data into training and test set is random.
+
+```{r}
+#Random sampling 
+samplesize = 0.60*nrow(data)
+set.seed(100)
+index = sample(seq_len(nrow(data)), size = samplesize)
+
+#Creating training and test set 
+datatrain = data[index,]
+datatest = data[-index,]
+```
+
+Build the model using the data in training set. Because of the log odds transformation, it is difficult to interpret the coefficients of the model. Note that in this case the coefficients of the regression cannot be interpreted in terms of marginal effects.  The coefficients are called as proportional odds and interpreted in terms of increase in log odds. The interpretation changes not only for the coefficients but also for the intercept. Unlike simple linear regression, in ordinal logistic regression we obtain `n-1` intercepts, where `n` is the number of categories in the dependent variable. The intercept can be interpreted as the expected odds of identifying in the listed categories. Set `Hess` equal to true which the logical operator to return hessian matrix. Returning the hessian matrix is essential to use summary function or calculate variance-covariance matrix of the fitted model.
+
+```{r}
+#Build ordinal logistic regression model
+model= polr(rpurchase ~ coupon + peers + quality , data = datatrain, Hess = TRUE)
+summary(model)
+```
+```{r eval=FALSE, echo=FALSE}
+Anova(model)
+```
+
+The table displays the value of coefficients and intercepts, and corresponding standard errors and `t` values.  The interpretation for the coefficients is as follows. _Holding everything else constant, an increase in value of coupon by one unit increase the expected value of rpurchase in log odds by 0.96._ Likewise, the coefficients of peers and quality can be interpreted. 
+
+Note the ordinal logistic regression outputs multiple values of intercepts depending on the levels of intercept. _The intercepts can be interpreted as the expected odds when others variables assume a value of zero_. For example, the `low probability | medium probability` intercept takes value of 2.13, indicating that the expected odds of identifying in low probability category, when other variables assume a value of zero, is 2.13. using the logit inverse transformation, the intercepts can be interpreted in terms of expected probabilities. The expected probability of identifying low probability category, when other variables assume a value of zero, is 0.89:
+
+```{r}
+boot::inv.logit(2.13)
+```
+
+
+The evaluation of the model is conducted on the test dataset. A basic evaluation approach is to compute the confusion matrix and the misclassification error.
+
+```{r}
+#Compute confusion table and misclassification error
+predictrpurchase = predict(model,datatest)
+table(datatest$rpurchase, predictrpurchase)
+mean(as.character(datatest$rpurchase) != as.character(predictrpurchase))
+```
+
+The confusion matrix shows the performance of the ordinal logistic regression model. For example, it shows that, in the test dataset, 76 times low probability category is identified correctly. Similarly, 10 times medium category and 0 times high category is identified correctly. Observe the model identifies high probability category poorly. This happens because of inadequate representation of high probability category in the training dataset. Using the confusion matrix, we find that the misclassification error for our model is 46%. 
+
+## Visual Interpretation
+
+The interpretation of the logistic ordinal regression in terms of log odds ratio is not easy to understand. Here is an alternative approach to interpretation using plots. 
+
+```{r}
+#Plotting the effects 
+Effect(focal.predictors = "quality",model)
+```
+```{r}
+plot(Effect(focal.predictors = "coupon",model))
+```
+
+The plots are intuitive and easy to understand. The plot above shows that coupon increases the likelihood of classification into high probability and medium probability classes, while decreasing the likelihood of classification in low probability class.
+
+It is also possible to look at joint effect of two independent variable. Below shows the joint effect of quality and coupon on identification of category of independent variable. Note  the interaction of coupon and quality increases the likelihood of identification in high probability category.
+
+```{r}
+plot(Effect(focal.predictors = c("quality", "coupon"),model))
+```
+
+# Conclusion
+
+Ordinal logistic regression extends the simple logistic regression model to the situations where the dependent variable is ordinal, i.e. can be ordered. Ordinal logistic regression has variety of applications, for example, it is __often used in marketing to increase customer life time value__. For example, consumers can be categorized into different classes based on their tendency to make repeated purchase decision. The document  develops around the case of consumer categorization. The independent variables of interest are – coupon held by consumers from previous purchase, influence of peers, quality of the product.
+
+There aretwo key takeaways. 
+
+- Ordinal logistic regression come handy while dealing with a dependent variable that can be ordered. If one uses multinomial logistic regression then the user is ignoring the information related to ordering of the dependent variable. 
+- The coefficients of the ordinal linear regression cannot be interpreted in a similar manner to the coefficients of ordinary linear regression. Interpreting the coefficents in terms of marginal effects is one of the common mistakes that users make while implementing the ordinal regression model. 
+
+> Use graphical methods to interpret the coefficients. It is easy to understand the individual and joint effects of independent variables on the likelihood of classification.
+
+Reference
+
+https://r-posts.com/how-to-perform-ordinal-logistic-regression-in-r/
+
+
+

@@ -1,5 +1,5 @@
 ---
-title: "Data manipulation with tidyr"
+title: "Introduction to k-means Clustering"
 output:
   html_document:
     highlight: pygments

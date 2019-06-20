@@ -17,9 +17,7 @@ packages("devtools","Rcpp", "plyr", "wordcloud", "ggplot2", "RColorBrewer", "tm"
 
 Intro to Text Analysis with R 
 
-Guest post by Christopher Johnson from www.codeitmagazine.com
-
-One of the most powerful aspects of using R is that you can download free packages for so many tools and types of analysis.  Text analysis is still somewhat in its infancy, but is very promising.  It is estimated that as much as 80% of the world’s data is unstructured, while most types of analysis only work with structured data.  In this paper, we will explore the potential of R packages to analyze unstructured text.
+It is estimated that as much as 80% of the world’s data is unstructured, while most types of analysis only work with structured data.  Lets explore the potential of R packages to analyze unstructured text.
 
 R provides two packages for working with unstructured text – `TM` and `Sentiment`.  `TM` can be installed in the usual way.  Unfortunately, Sentiment has been archived in 2012, and is therefore more difficult to install.  However, it can still be installed using the following method, according to Frank Wang (Wang).
 ```{r}
