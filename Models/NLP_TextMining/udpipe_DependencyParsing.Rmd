@@ -1,0 +1,84 @@
+---
+title: "udpipe Dependency Parsing"
+output:
+  prettydoc::html_pretty:
+    theme: Architect
+    highlight: github
+---
+
+```{r message=FALSE, warning=FALSE}
+setwd("~/R/Complete")
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("udpipe","igraph", "ggraph", "ggplot", "dplyr", "kableExtra", prompt = FALSE)
+```
+
+> There is a good function for plotting that should be recalled to make the plotting fast and simple.
+
+# Introduction
+
+Dependency parsing is an NLP technique which provides to each word in a sentence the link to another word in the sentence, which is called it's syntactical head. This link between each 2 words furthermore has a certain type of relationship giving you further details about it.
+
+`udpipe` provides such a dependency parser. With the output of dependency parsing, you can answer questions like
+
+- What is the nominal subject of a text
+- What is the object of a verb
+- Which word modifies a noun
+- What is the linked to negative words
+- Which words are compound statements
+- What are noun phrases, verb phrases in the text
+
+Example
+
+> His speech about marshmallows in New York is utter bullshit
+
+Running this code, will provide you the dependency relationships among the words of the sentence in the columns `token_id`, `head_token_id` and `dep_rel.` The possible values in the field `dep_rel` are defined at https://universaldependencies.org/u/dep/index.html.
+
+```{r message=FALSE}
+x <- udpipe("His speech about marshmallows in New York is utter bullshit", "english")
+
+kable(select(x, -c(doc_id, paragraph_id, sentence_id, sentence))) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
+
+For visualizing the relationships between the words which were found, use 'ggraph'. 
+
+```{r}
+# library(igraph)
+# library(ggraph)
+# library(ggplot2)
+
+plot_annotation <- function(x, size = 3){
+  stopifnot(is.data.frame(x) & all(c("sentence_id", "token_id", "head_token_id", "dep_rel",
+                                     "token_id", "token", "lemma", "upos", "xpos", "feats") %in% colnames(x)))
+  x <- x[!is.na(x$head_token_id), ]
+  x <- x[x$sentence_id %in% min(x$sentence_id), ]
+  edges <- x[x$head_token_id != 0, c("token_id", "head_token_id", "dep_rel")]
+  edges$label <- edges$dep_rel
+  g <- graph_from_data_frame(edges,
+                             vertices = x[, c("token_id", "token", "lemma", "upos", "xpos", "feats")],
+                             directed = TRUE)
+  ggraph(g, layout = "linear") +
+    geom_edge_arc(ggplot2::aes(label = dep_rel, vjust = -0.20),
+                  arrow = grid::arrow(length = unit(4, 'mm'), ends = "last", type = "closed"),
+                  end_cap = ggraph::label_rect("wordswordswords"),
+                  label_colour = "red", check_overlap = TRUE, label_size = size) +
+    geom_node_label(ggplot2::aes(label = token), col = "darkgreen", size = size, fontface = "bold") +
+    geom_node_text(ggplot2::aes(label = upos), nudge_y = -0.35, size = size) +
+    theme_graph(base_family = "Arial Narrow") +
+    labs(title = "udpipe output", subtitle = "tokenisation, parts of speech tagging & dependency relations")
+}
+```
+
+```{r warning=FALSE}
+plot_annotation(x, size = 4)
+```
+
+```{r warning=FALSE}
+x <- udpipe("The economy is weak but the outlook is bright", "english")
+plot_annotation(x, size = 4)
+```
+
+With dependency parsing you can answer the question _What is weak?_, it is the economy. _What is bright?_, it is the outlook as these nouns relate to the adjectives with nominal subject as type of relationship. That is more information than just looking at wordclouds.
+
+Reference:  http://www.bnosac.be/index.php/blog/93-dependency-parsing-with-udpipe

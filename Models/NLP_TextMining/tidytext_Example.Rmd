@@ -1,0 +1,187 @@
+---
+title: "tidytext Example"
+output:
+  prettydoc::html_pretty:
+    theme: Architect
+    highlight: github
+---
+
+```{r message=FALSE, warning=FALSE}
+setwd("~/GitHub/MachineLearning/Models/NLP_TextMining/")
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse","gutenbergr", "tidytext", "triebeard", prompt = FALSE)
+
+#devtools::install_github('cttobin/ggthemr')
+library(ggthemr)
+```
+
+> Introduces `ggthemr` - a great package for professional ggplot
+
+# Introduction
+
+Perform a text mining analysis of two philosophical works on the topic of individual liberty: John Locke’s _Second Treatise of Goverenment_ and John Stuart Mill’s _On Liberty_.
+
+# A brief excursion into political philosophy
+
+_Second Treatise of Government_ was published in 1690, while _On Liberty_ was published 1859. Both of these influential works are ostensibly about individual freedom. However, they are nonetheless different in important ways.
+
+First, while _Second Treatise_ is predominantly about civil liberty, or freedom from tyrannical forms of government that infringe upon individual rights to life, liberty, and property, _On Liberty_ mainly focuses on personal liberty, i.e., freedom of speech/thought and social non-conformity.
+
+Second, the two authors differed fundamentally in their view of natural rights.
+
+- Locke argued that natural law gives all people universal and unalienable rights of self-ownership and self-determination, and that the purpose of government is to protect these rights. 
+- Mill did not believe in the logical existence of natural rights, and therefore made his defense of individual liberty from the standpoint of utilitarianism, or the greatest happiness for the greatest number.
+
+Based on these differences, you might expect word usage to differ somewhat between _Second Treatise_ and _On Liberty_. 
+
+# Tidytext
+
+Project Gutenberg has _Second Treatise of Government_ and _On Liberty_ in its free digital archives. Uese `gutenbergr` to download the works.
+
+```{r message=FALSE, warning=FALSE}
+# set plot theme
+ggthemr("dust")
+```
+
+Use the metadata file from `gutenbergr` to find the ID numbers for _Second Treatise_ and _On Liberty_. 
+
+## Locke.
+
+```{r message=FALSE}
+# Download Second Treatise of Governement
+locke <- gutenberg_download(gutenberg_id = 7370)
+
+# Show a selection of text
+locke %>% select(text) %>% slice(50:56)
+```
+
+```{r message=FALSE}
+# Tokenize text and remove stop words
+tidy_locke <- locke %>% 
+  unnest_tokens(output = word, input = text, token = "words") %>%
+  anti_join(stop_words) %>% 
+  mutate(word = str_extract(word, "[a-z']+"))
+
+# Show a selection of tokens (words)
+tidy_locke %>% select(word) %>% slice(144:170)
+```
+
+The sentences have been broken up, or tokenized, into seperate words, and the stop words (here, the, and, etc.) have been removed.
+
+A few notes about the code in the chunk above:
+
+- there are many other options in the _tidytext::unnest_tokens_ function, including characters, sentences, and paragraphs.
+- used _stringr::str_extract_ function (as suggested in Text Mining with R) to change the output of `unnest_tokens` to include only actual words, and no numbers. Because, counterintuitively, `token = "words"` can also return numbers.
+
+## On Liberty.
+
+```{r message=FALSE}
+# Download On Liberty
+mill <- gutenberg_download(gutenberg_id = 34901)
+
+# Tokenize text and remove stop words
+tidy_mill <- mill %>% 
+  unnest_tokens(output = word, input = text, token = "words") %>%
+  anti_join(stop_words) %>% mutate(word = str_extract(word, "[a-z']+"))
+```
+
+Now that we have two tidy data frames of words from each text, we can make some charts of word frequency to see how different Locke and Mill were with regard to word choice.
+
+## Visualizing word frequencies
+
+Plot the top 10 most frequently used words by John Locke in _Second Treatise_.
+
+```{r}
+# Calculate word counts and percentages
+tidy_locke_n <- tidy_locke %>% count(word, sort = TRUE)%>% mutate(pct = n/sum(n))
+
+# Plot word frequencies
+tidy_locke_n %>% 
+  top_n(10, n) %>% 
+  filter(word != "NA") %>% 
+  ggplot(aes(x = reorder(word, n), y = n)) +
+  geom_col(aes(fill = pct*100)) +
+  coord_flip() +
+  labs(title = "Top 10 Most Frequently Used Words",
+       subtitle = "Second Treatise of Government, John Locke",
+       x = "",
+       y = "Frequency",
+       caption = "sethdobson.netlify.com") +
+  theme(plot.caption = element_text(face = "italic")) +
+  scale_fill_continuous("% of Total")
+```
+
+
+By far the most frequently used word is _power_, which represents ~2% of all words. Other words in the top 10 reflect Locke’s focus on the proper role of government in people’s lives and his emphasis on natural law.
+
+Plot the top 10 most frequently used words in _On Liberty_.
+
+```{r}
+# Calculate word counts and percentages
+tidy_mill_n <- tidy_mill %>% count(word, sort = TRUE) %>% mutate(pct = n/sum(n))
+
+# Plot word frequencies  
+tidy_mill_n %>% 
+  top_n(10, n) %>%
+  filter(word != "NA") %>% 
+  ggplot(aes(x = reorder(word, n),y = n)) +
+  geom_col(aes(fill = pct*100)) +
+  coord_flip() +
+  labs(title = "Top 10 Most Frequently Used Words",
+       subtitle = "On Liberty, John Stuart Mill",
+       x = "",
+       y = "Frequency",
+       caption = "sethdobson.netlify.com") +
+  theme(plot.caption = element_text(face = "italic")) +
+  scale_fill_continuous("% of Total")
+```
+
+_Opinion_ is the most frequently used word. Together with _opinions_, these two words represent 0.87% of all words used by Mill.
+
+```{r}
+# Calculate the summed percentage of "opinion" and "opinions"
+tidy_mill_n %>% filter(word %in% c("opinion", "opinoins")) %>% summarise(sum_pct = sum(pct)*100)
+```
+
+It is interesting to note that there is almost no overlap between the top 10 most frequently used words by Locke and Mill. Only the word _people_ appears in the top 10 of both books.
+
+If we combine both data sets into one data frame, we can look at the correlation between the frequencies for all the words. To do this, we need to join the word frequencies from _Second Treatise_ with _On Liberty_.
+
+Use `dplyr::full_join` function to get the full set of words across both books. The trick is to then use `dplyr::replace_na` to make all missing words have a value of 0.
+
+```{r}
+# Combine word frequency data frames
+tidy_both_n <- tidy_locke_n %>% 
+  select(word, n, pct) %>% 
+  rename(n_locke = n, pct_locke = pct) %>% 
+  full_join(y = tidy_mill_n, by = "word") %>% 
+  rename(pct_mill = pct, n_mill = n) %>% 
+  replace_na(list(n_locke = 0, pct_locke = 0, pct_mill = 0, n_mill = 0))
+
+# Plot combined frequencies for all words
+tidy_both_n %>% 
+  filter(word != "NA") %>% 
+  ggplot(aes(x = pct_locke, y = pct_mill, label = word)) +
+  geom_abline(intercept = 0, slope = 1, lty = 2, lwd = 1.05) +
+  stat_smooth(method = lm) +
+  geom_jitter(alpha = 0.25, size = 2.5) +
+  geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = .05)) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = .05)) +
+  labs(title = "Comparison of Word Frequencies",
+       subtitle = "John Locke vs John Stuart Mill",
+       x = "Second Treatise of Goverment",
+       y = "On Liberty",
+       caption = "sethdobson.netlify.com") +
+  theme(plot.caption = element_text(face = "italic"))
+``` 
+
+There is a positive correlation between the word frequencies overall, as indicated by the linear regression line having a $slope > 0 (Pearson’s r = 0.448)$.
+
+Most of the most frequently used words in each book fall far from the line.
+
+There is a small set of words that each author uses relatively frequently that also show similar percentages. This set includes the words _liberty_, _life_, _public_, _person_, _mankind_ and _free._
+
+# Reference
+https://sethdobson.netlify.com/2019/07/24/visualizing-locke-and-mill-a-tidytext-analysis/

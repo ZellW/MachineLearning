@@ -1,0 +1,1068 @@
+---
+title: 'EDA Package Review'
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+#table-of-contents h2 {
+  background-color: #4294ce;}
+#table-of-contents{
+  background: #688FAD;}
+#nav-top span.glyphicon{
+  color: #4294ce;}
+#postamble{
+  background: #4294ce;
+  border-top: ;}
+</style>
+
+```{r echo=FALSE, warning=F, message=F}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "ggthemes", prompt = TRUE)
+options(digits = 3)
+
+setwd("~/R/DataJourney/Robby_Mortgage") #change as needed
+```
+
+# Introduction
+
+This document simply evaluates the capabilities of a variety of R EDA packages.  The goal is to select a subset to use in future projects consistently.
+
+# Data
+
+Will use data provided by Robbie used the the mortgage lead score prediction algorithm.
+
+```{r getData, message=FALSE}
+combined_data <- read_csv("00_data/combined-data.csv")
+
+#Remove columns not needed
+myData <- combined_data %>% dplyr::select(-c(contains("phone")))
+
+myData <- myData %>% dplyr::select(-c("leadid", "eventually_apply", "application_dt", "funded_dt",
+                               "dialed_number", "start_date_time"))
+glimpse(myData)
+```
+
+# Quick Aside
+
+The code below was built using the original raw data.  Nice code - took me a while to split a long table into 2.  This might be helpful in the future. (It seems pretty simple now - perhaps I should be embarrassed.)
+
+```{r getSources, message=FALSE}
+library(kableExtra)
+library(dplyr)
+
+tmpSources <- unique(myData$lead_source_code)
+tmpSources <- as.data.frame(tmpSources)
+
+# kable(tmpSources[1:15,])
+# kable(tmpSources[1:floor(nrow(tmpSources)/2),])
+
+kable1 <- tmpSources[1:floor(nrow(tmpSources)/2),]
+kable2 <- tmpSources[floor(nrow(tmpSources)/2+1):nrow(tmpSources),]
+
+# kable(list(kable1, kable2))
+
+kable(list(kable1, kable2), col.names = ("Lead Source")) %>% 
+  kable_styling(bootstrap_options = c("striped", "hover", full_width = F))
+```
+```{r echo=FALSE}
+detach("package:kableExtra", unload=TRUE) 
+```
+
+----
+
+# EDA Package Review
+
+The following R Packages are introduced:
+
+- DataExplorer
+- SmartEDA
+- funModeling
+- rpivotTable
+- XDA
+- skmir
+- PerformanceAnalytics
+- descriptr
+- inspectdf
+
+Also included:
+
+- Miscellaneous EDR R code snippets
+- synthpop - generate anonymized data from existing data while maintaining data characteristics
+
+## Data Explorer
+
+Package intro found [here](https://cran.r-project.org/web/packages/DataExplorer/vignettes/dataexplorer-intro.html) It is the only package (that I have found) that can create a complete EDA report with one function!  `create_report`!
+
+`plot_str` creates an interactive plot displaying the structure of the data.  It does not work interactively in rMarkdown so an image of the output is provided below.
+
+```{r dataEDA, echo=FALSE}
+library(DataExplorer)
+```
+
+```{r eval=FALSE}
+library(DataExplorer)
+plot_str(myData) # interesting but not terribly useful
+```
+
+```{r, out.width = "300px", echo=FALSE}
+knitr::include_graphics("./images/DataExplorer1.PNG")
+```
+
+```{r}
+introduce(myData) # not a fan of the long format
+```
+
+```{r}
+plot_intro(myData) # nice
+```
+
+```{r}
+plot_missing(myData) # nice
+```
+
+It is easy to customize the plots using `ggthemes`.  There are many to choose from:
+
+```{r}
+ls("package:ggthemes")[grepl("theme_", ls("package:ggthemes"))]
+```
+
+You can find examples [here](https://yutannihilation.github.io/allYourFigureAreBelongToUs/ggthemes/).
+
+Here is the default plot:
+
+```{r message=FALSE, warning=FALSE}
+plot_bar(myData)
+```
+
+And here is a customized plot:
+
+```{r message=FALSE, warning=FALSE}
+plot_bar(myData, title = "My Test", maxcat = 6, ggtheme = theme_solarized_2())
+```
+```{r}
+plot_bar(myData, with = "loan_to_value", maxcat = 10)
+```
+```{r}
+plot_histogram(myData)
+```
+```{r message=FALSE, warning=FALSE}
+plot_correlation(myData, maxcat = 4)
+```
+
+`DataExplorer` can create an [EDA Report](http://127.0.0.1:11297/library/DataExplorer/html/create_report.html) automatically - and it is pretty good!  It is super good if you need to do something fast.
+
+I encourage you to run the code below (it creates many messages when building - messages I cannot silence so the code chunk is not evaluated when `knitr` is run to produce HTML output from this document.)
+
+```{r message=FALSE, warning=FALSE, eval=FALSE}
+create_report(myData)
+```
+```{r, echo=FALSE}
+detach("package:DataExplorer", unload=TRUE)
+```
+
+Overall impression - good package, competitive with other EDA package options.
+
+## SmartEDA
+
+```{r SmartEDA, warning=FALSE, message=FALSE}
+library(SmartEDA)
+
+ExpData(myData, type=1)
+ExpData(myData, type=2)
+```
+
+`ExpNumStat` provides data overviews  by changing parameters, different view are possible.
+```{r}
+ExpNumStat(myData, by="A")
+```
+
+```{r}
+ExpNumStat(myData, by="G", gp="eventually_fund")
+```
+
+```{r}
+ExpNumStat(myData, by="GA", gp="eventually_fund")
+```
+
+Graphical representation of all numeric features - Density plot (Univariate)
+
+```{r}
+plot1 <- ExpNumViz(myData, nlim = 4, Page=c(2,2))
+plot1[[1]]
+```
+
+frequency for all categorical independent variables
+
+```{r}
+ExpCTable(myData)
+```
+
+Bar plots for all categorical variables - simple but well-formatted plots.
+
+```{r}
+plot1 <- ExpCatViz(myData, fname=NULL, clim=10, margin=2, Page=c(2,2))
+plot1[[1]]
+```
+
+When the target is a continuous variable, more plots are available. Better plots would be displayed in the data were different.)
+
+```{r message=FALSE, warning=FALSE}
+plot1 <- ExpNumViz(myData, gp="time_lead_to_call", Page=c(2,2))
+plot1[[1]]
+```
+
+```{r message=FALSE}
+plot1 <- ExpNumViz(myData, gp="eventually_fund", type=1, Page=c(2,2))
+plot1[[1]]
+```
+
+```{r}
+plot1 <- ExpCatViz(myData, Page=c(2,2))
+plot1[[1]]
+```
+
+And there is more to the package that I have skipped.
+
+But before we leave this one:
+
+```{r}
+ExpParcoord(sample_n(myData, 1000),Group = "loan_purpose", Nvar=c("self_reported_fico", "loan_to_value", "loan_amount"))
+```
+
+> Parallel plot is the equivalent of a spider chart, but with Cartesian coordinates. Thus, it is often preferred.
+
+To understand parallel coordinate plot, look [here](https://www.data-to-viz.com/graph/parallel.html).
+
+Overall impression - Useful
+
+```{r echo=FALSE}
+detach("package:SmartEDA", unload=TRUE)
+```
+
+## funModeling
+
+This package provides more functionality than illustrated below.  An example of this - gain and lift charts!  For these reasons, I suggest `funModleing` be part of your daily toolset.
+
+Note; Below I occasionally used a different data set to illustrate all the features more effectively.
+
+```{r funModeling, message=FALSE, warning=FALSE}
+library(funModeling)
+
+df_status(myData)
+freq(myData, plot=TRUE, na.rm = TRUE)
+
+property_freq <- freq(myData, "property_state", plot=F)
+property_freq[1:10,]
+myData$property_state2 =ifelse(myData$property_state %in% property_freq[1:25,'property_state'],
+                                     myData$property_state, 'other')
+freq(myData, 'property_state2')
+
+
+variable_importance = var_rank_info(heart_disease, "has_heart_disease")
+variable_importance
+ggplot(variable_importance, aes(x = reorder(var, gr), y = gr, fill = var)) + 
+  geom_bar(stat = "identity") + coord_flip() + theme_bw() + 
+  xlab("") + ylab("Variable Importance (based on Information Gain)") + guides(fill = FALSE)
+
+cross_plot(heart_disease, input="max_heart_rate", target="has_heart_disease")
+#Is heart_disease_severity the feature that explains the target the most?
+#No, this variable was used to generate the target, thus we must exclude it.
+
+
+heart_disease$oldpeak_2 = equal_freq(var=heart_disease$oldpeak, n_bins = 3)
+summary(heart_disease$oldpeak_2)
+cross_oldpeak_2=cross_plot(heart_disease, input="oldpeak_2", target="has_heart_disease", auto_binning = F)
+
+
+vars_to_analyze=c("age", "oldpeak", "max_heart_rate")
+cross_plot(data=heart_disease, target="has_heart_disease", input=vars_to_analyze)
+
+```
+```{r echo=FALSE}
+detach("package:funModeling", unload=TRUE)
+```
+
+Overall impression - best overall EDA package with functionality beyond EDA.
+
+## rpivotTable
+
+Pretty cool - an interactive tool for precision/recall!
+
+```{r warning=FALSE, message=FALSE}
+library(rpivotTable)
+
+## reading the data
+data=read.delim(file="https://goo.gl/ac5AkG", sep="\t", header = T, stringsAsFactors=F)
+data$predicted_target=ifelse(data$score>=0.5, "yes", "no")
+rpivotTable(data = data, rows = "predicted_target", cols="target", aggregatorName = "Count", 
+            rendererName = "Table", width="100%", height="400px")
+
+```
+```{r echo=FALSE}
+detach("package:rpivotTable", unload=TRUE)
+```
+
+Overall impression - useful in limited cases (even thought it is pretty cool.)  Might be useful to include in a shiny app.
+
+## XDA
+
+```{r XDA, message=FALSE, warning=FALSE}
+#devtools::install_local("C:\\Users\\czbs7d\\Documents\\R\\packagesGithub\\xda-master.zip")
+library(xda)
+
+numSummary(myData)
+charSummary(myData)
+Plot(iris, "Petal.Length")
+```
+```{r echo=FALSE}
+detach("package:xda", unload=TRUE)
+```
+
+Overall impression - does not do anything better than the other packages reviewed.
+
+## skimr
+
+```{r skimr, message=FALSE}
+library(skimr)
+skim(myData)
+```
+```{r results="asis"}
+skim(myData) %>% skimr::kable()
+```
+```{r echo=FALSE}
+detach("package:skimr", unload=TRUE)
+```
+
+Overall impression - good when you need a compact view or summary statistics.
+
+## PerformanceAnalytics
+
+PerformanceAnalytics is a library of functions designed for evaluating the performance and risk characteristics of financial assets or funds.
+It does to apply to more general use.
+
+```{r eval=FALSE}
+# install.packages("PerformanceAnalytics")
+library("PerformanceAnalytics")
+detach("package:PerformanceAnalytics", unload=TRUE)
+```
+
+## descriptr
+
+```{r}
+library("descriptr")
+```
+This is one of the newest EDA package.  I was made aware of it 3/5/19.
+
+https://descriptr.rsquaredacademy.com/
+
+- Summary statistics
+- Two way tables
+- One way table
+- Group wise summary
+- Multiple variable statistics
+- Multiple one way tables
+- Multiple two way tables
+
+I will concentrate on the visuralizations suppported in the package.
+
+> THere is a Shivy version too!  `ds_launch_shiny_app()`
+
+```{r}
+str(mtcarz)
+```
+
+```{r}
+ds_plot_histogram(mtcarz)
+```
+
+```{r}
+ds_plot_density(mtcarz)
+```
+
+```{r}
+ds_plot_box_single(mtcarz)
+```
+
+```{r}
+ds_plot_scatter(mtcarz, mpg, disp, hp)
+```
+
+```{r}
+ds_plot_bar(mtcarz)
+```
+
+```{r}
+ds_plot_bar_stacked(mtcarz, cyl, gear, am)
+```
+
+```{r}
+ds_plot_bar_grouped(mtcarz, cyl, gear, am)
+```
+
+```{r}
+ds_plot_box_group(mtcarz, cyl, gear, mpg, disp)
+```
+
+
+The `ds_screener()` function will screen data frames and return details such as variable names, class, levels and missing values. The` plot.screener()` creates bar plots to visualize % of missing observations for each variable in a data frame.
+
+```{r}
+ds_screener(mtcarz)
+# Requires new version
+#plot.ds_screener(mtcarz)
+```
+
+
+```{r}
+detach("package:descriptr", unload=TRUE) 
+```
+
+Overall Impression:
+
+## inspectdf
+
+```{r setup, include=FALSE}
+# install and load the package - https://github.com/alastairrushworth/inspectdf
+library(inspectdf)
+```
+
+### Data
+
+```{r}
+#Download the data set
+df= read_csv('inspectdf_data.csv', col_names = TRUE)
+
+#Quick view of the data frame
+head(df, 10)
+dim(df)
+```
+
+We need three data frames.  We need one data frame with the complete data set.  We simply rename df to allGrades. We also need two subsetted data sets to leverage the packages easy data frame comparison features.  We create the data frames oldGrades (6-8) and youngGrades (3-5).
+```{r message=FALSE}
+allGrades <- df
+
+oldGrades <- allGrades %>% filter(Grade > 5)
+
+youngGrades <- allGrades %>% filter(Grade < 6)
+
+ggplot(oldGrades, aes(x=Grade)) + geom_histogram()
+ggplot(youngGrades, aes(x=Grade)) + geom_histogram()
+```
+
+### inspectdf Functions
+
+Simply pass in a dataframe, or two (for comparisons) and set show_plot = TRUE.  The output will include both a tibble with the raw data and a visualization.  
+
+#### inspect_types() function
+
+```{r}
+inspect_types(allGrades, show_plot = TRUE)
+```
+
+Compare between youngGrades and oldGrades
+
+```{r}
+inspect_types(youngGrades, oldGrades, show_plot = TRUE)
+```
+
+#### inspect_mem() function
+
+```{r}
+inspect_mem(allGrades, show_plot = TRUE)
+```
+
+Compare between youngGrades and oldGrades
+
+```{r}
+inspect_mem(youngGrades, oldGrades, show_plot = TRUE)
+```
+
+#### inspect_na() function
+
+```{r}
+inspect_na(allGrades, show_plot = TRUE)
+```
+
+Compare between youngGrades and oldGrades
+
+```{r}
+inspect_na(youngGrades, oldGrades, show_plot = TRUE)
+```
+
+#### inspect_num() function
+
+```{r}
+inspect_num(allGrades, show_plot = TRUE)
+```
+
+Compare between youngGrades and oldGrades
+
+```{r out.width=10}
+inspect_num(youngGrades, oldGrades, show_plot = TRUE)
+```
+
+#### inspect_imb() function to identify factors which might be overly prevalent.
+
+```{r}
+inspect_imb(allGrades, show_plot = TRUE)
+```
+
+Compare between youngGrades and oldGrades
+
+```{r}
+inspect_imb(youngGrades, oldGrades, show_plot = TRUE)
+```
+
+#### inspect_cat() function
+
+```{r}
+inspect_cat(allGrades, show_plot = TRUE)
+```
+
+Compare between youngGrades and oldGrades
+
+```{r}
+inspect_cat(youngGrades, oldGrades, show_plot = TRUE)
+```
+
+#### inspect_cor() function
+
+Why insepct_cor over base corr?
+
+- `cor()` requires numeric inputs only
+- Correlation matrices are hard to read
+- `cor()` doesn't produce confidence intervals
+- `cor()` and `cor.test()` don't provide visualisation methods out of the box
+
+
+```{r}
+inspect_cor(allGrades, show_plot = TRUE)
+```
+
+Compare between youngGrades and oldGrades
+
+```{r}
+inspect_cor(youngGrades, oldGrades, show_plot = TRUE)
+```
+
+```{r}
+allGrades %>% inspect_cor() %>% show_plot()
+```
+
+```{r}
+allGrades %>% inspect_cor(with_col = "ScreenTime") %>% show_plot()
+```
+
+
+## Overall Impression
+
+I like this package because it's got a lot of functionality and it's incredibly straightforward. In short it allows you to understand and visualize column types, sizes, values, value imbalance & distributions as well as correlations.  Further to this, it allows you to very easily perform any of the above features for an individual data frame, or to compare the differences between two data frames. 
+
+# Miscellaneous Code
+
+## # NULL to NA
+```{r eval=FALSE}
+# NULL to NA
+dataset  <-  dataset %>% replace(.=="NULL", NA)
+```
+
+## No Variance
+```{r eval=FALSE}
+nzv <- nearZeroVar(dataset, saveMetrics = TRUE)
+nzv
+rm(nzv)
+# If `TRUE` is returned for `zeroVa` or `nzv`, determine if these values should be removed.
+dataset <- dataset[, -nzv]
+```
+
+## Collect Variables by Type
+```{r eval=FALSE}
+numeric_columns <- colnames(dataset[, sapply(dataset, is.numeric)])
+categorical_columns <- colnames(dataset[, sapply(dataset, is.character)])
+```
+
+## Potential ID Columns
+```{r eval=FALSE}
+## Parse column name to look for ID to suggest ID columns
+myIDs <- filter(df_status(dataset), grepl("id", variable, ignore.case = TRUE)) %>% select(variable, type, unique)
+myIDs[,1]
+# ID variables rarely useful in algorithm development.  Consider removing from dataset.
+if(nrow(myIDs) > 0){dataset <- dataset %>% select(-contains("id"))}
+```
+
+## Columns to Factors
+```{r eval=FALSE}
+# Adjust number in filter to change unique count cutoff limit
+## Identify columns to be converted to factors
+temp <- dataset[colnames(dataset[,sapply(dataset,is.character)])] %>% summarise_all(funs(n_distinct(.)))
+factor_columns <- melt(as.data.frame(temp)) %>% filter(value <= 15) %>% select(variable) %>% .[["variable"]] %>% as.character()
+## Convert columns to factors if less than 15 unique values
+dataset[factor_columns] <- lapply(dataset[factor_columns], factor)
+rm(temp)
+```
+
+## Missing Data Patterns
+```{r eval=FALSE}
+mice_plot <- aggr(dataset, col=c('navyblue','yellow'),
+                    numbers=TRUE, sortVars=TRUE,
+                    labels=names(dataset), cex.axis=.7,
+                    gap=3, ylab=c("Missing data","Pattern"))
+# Percentage of Missing Values Per Feature
+plot_missing(dataset)
+
+# Drop specific columns with missing data
+dataset <- dataset[ , !(names(dataset) %in% c("Column1", "Column2"))]
+```
+
+## Imputed Data
+
+### MICE
+
+MICE assumes that the missing data are Missing at Random (MAR), which means that the probability that a value is missing depends only on observed value and can be predicted using them. It imputes data on a variable by variable basis by specifying an imputation model per variable.
+
+For example: Suppose we have X1, X2..Xk variables. If X1 has missing values, then it will be regressed on other variables X2 to Xk. The missing values in X1 will be then replaced by predictive values obtained. Similarly, if X2 has missing values, then X1, X3 to Xk variables will be used in prediction model as independent variables. Later, missing values will be replaced with predicted values.
+
+By default, linear regression is used to predict continuous missing values. Logistic regression is used for categorical missing values. Once this cycle is complete, multiple data sets are generated. These data sets differ only in imputed missing values. Generally, it's considered to be a good practice to build models on these data sets separately and combining their results.
+
+```{r MICE,  eval=FALSE}
+# Inpute missing data
+imputed_Data <- mice(dataset, m=5, maxit = 50, method = 'pmm', seed = 500)
+
+summary(imputed_Data)
+
+# Create density plot of inputed variables. You are looking to be sure the distributions are about equal. Blue represents actual observations.
+densityplot(imputed_Data)
+
+# Add the inputed data back into the dataset to complete it
+dataset_mice <- complete(imputed_Data,1)
+```
+
+### Impute With missForest
+
+missForest is an implementation of random forest algorithm. It's a non parametric imputation method applicable to various variable types.It builds a random forest model for each variable. Then it uses the model to predict missing values in the variable with the help of observed values.
+
+Since bagging works well on categorical variable too, we don't need to remove them here.
+
+> It appears `character` variables cause missForest to error
+
+> missForest not a good solution when few distinct values in a column
+
+```{r missForest,  eval=FALSE}
+## Interesting, in the package the function prodNA can be used to randomly introcude NAs
+dataset_mis <- prodNA(dataset, noNA = 0.1)
+dataset_mis <- dataset_mis %>% mutate_if(is.character, is.factor)
+sum(is.na(dataset_mis))
+imputed_Data_missF <- missForest(as.data.frame(dataset_mis))
+sum(is.na(imputed_Data_missF))
+rm(dataset_mis)
+```
+
+### Hmisc
+
+`aregImpute()` allows mean imputation using additive regression, bootstrapping, and predictive mean matching.
+
+In bootstrapping, different bootstrap resamples are used for each of multiple imputations. Then, a flexible additive model (non parametric regression method) is fitted on samples taken with replacements from original data and missing values (acts as dependent variable) are predicted using non-missing values (independent variable).
+
+Then, it uses predictive mean matching (default) to impute missing values. Predictive mean matching works well for continuous and categorical (binary & multi-level)
+
+```{r Hmisc,  eval=FALSE}
+# Testing tool for seeding missing data
+dataset <- prodNA(dataset, noNA = 0.1)
+
+# Inpute missing data
+impute_arg <- aregImpute(~ Age + Fare + Sex, data = dataset, n.impute = 5)
+```
+
+## Factor Relevel
+
+Examine and re-order factors in the dataset
+```{r  eval=FALSE}
+# Show all levels of a factor
+levels(dataset$Embarked)
+
+# Manually order factors
+dataset$Embarked <- factor(dataset$Embarked, levels = c("S", "Q", "C"))
+
+# Make a specific factor first
+dataset$Embarked <- relevel(dataset$Embarked, "Q")
+
+# Reverse the order of the factor
+dataset$Embarked <- factor(dataset$Embarked, levels=rev(levels(dataset$Embarked)))
+```
+
+## Outlier Management
+
+Change the declared y-value to the column of interest
+
+```{r  eval=FALSE}
+for (i in 1:length(numeric_columns)){
+print(numeric_columns[i])
+
+tempplot <- ggplot(dataset, aes(x = "", y = numeric_columns[i])) + geom_boxplot(outlier.color="red", outlier.shape=8, outlier.size=4) + scale_y_continuous()}
+```
+
+Below, change the variable cutOff to meet you needs.  cutOff determines the number of unique 
+values in each numeric column needed to produce a boxplot.
+
+```{r  eval=FALSE}
+cutOff = 10 #Number of unique values required to output a boxplot
+tmpDF <- dataset[, sapply(dataset, is.numeric)] #get only numeric columns
+tmpDF <- na.omit(tmpDF) #just a check to avoid ggplot messages
+
+#keep cols that meet cutOff requirement
+tmpDF <- tmpDF[, sapply(tmpDF, function(col) length(unique(col))) >= cutOff] 
+tmpDF <- data.frame(tmpDF)
+
+#https://stackoverflow.com/questions/15027659/how-do-you-draw-a-boxplot-without-specifying-x-axis
+plot_data = function (data, column)
+    ggplot(data = data, aes_string(x = factor(0), y = column)) + 
+    geom_boxplot(outlier.color="red", outlier.shape=8, outlier.size=2) + xlab(column) + ylab("")
+
+myplots <- lapply(colnames(tmpDF), plot_data, data = tmpDF)
+myplots
+rm(cutOff, tmpDF, myplots)
+```
+
+### Custom Outlier Function
+
+```{r outlierKD, }
+outlierKD <- function(dt, var) {
+     var_name <- eval(substitute(var),eval(dt))
+     na1 <- sum(is.na(var_name))
+     m1 <- mean(var_name, na.rm = T)
+     par(mfrow=c(2, 2), oma=c(0,0,3,0))
+     boxplot(var_name, main="With outliers")
+     hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+     outlier <- boxplot.stats(var_name)$out
+     mo <- mean(outlier)
+     
+     var_name <- ifelse(var_name %in% outlier, NA, var_name)
+     boxplot(var_name, main="Without outliers")
+     hist(var_name, main="Without outliers", xlab=NA, ylab=NA)
+     
+     title("Outlier Check", outer=TRUE)
+     
+     na2 <- sum(is.na(var_name))
+     cat("Outliers identified:", na2 - na1, "n")
+     cat("Propotion (%) of outliers:", round((na2 - na1) / sum(!is.na(var_name))*100, 1), "n")
+     cat("Mean of the outliers:", round(mo, 2), "n")
+     m2 <- mean(var_name, na.rm = T)
+     cat("Mean without removing outliers:", round(m1, 2), "n")
+     cat("Mean if we remove outliers:", round(m2, 2), "n")
+     # response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+     # if(response == "y" | response == "yes"){
+     #      dt[as.character(substitute(var))] <- invisible(var_name)
+     #      assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+     #      cat("Outliers successfully removed", "n")
+     #      return(invisible(dt))
+     # } else{
+     #      cat("Nothing changed", "n")
+     #      return(invisible(var_name))
+     # }
+}
+```
+
+```{r eval=FALSE}
+for (i in 1:length(colnames(select_if(dataset,is.numeric)))){
+outlierKD(dataset, get(paste(colnames(select_if(dataset,is.numeric)[i])))) }
+```
+
+Examine the top 25 rows of a column containing outliers
+Change the column name to the specified column
+
+```{r eval=FALSE}
+tmpRev <- arrange(dataset, desc(Age)) %>% select(Age)
+tmpRev <- as.data.frame(head(tmpRev$Age, 25))
+names(tmpRev) <- "Age"
+tmpRev
+```
+
+### Outlier Handling Options
+
+The Tukey method formula: The bottom threshold is: Q1 - 3IQR. All below are considered as outliers. The top threshold is: Q1 + 3(IQR). All above are considered as outliers.
+
+The Hampel method formula: The bottom threshold is: median_value ??? 3(mad_value). All below are considered as outliers. The top threshold is: median_value + 3(mad_value). All above are considered as outliers.
+
+Change columns to columns of interest
+
+```{r eval=FALSE}
+# Tukey method outlier thresholds
+ukey_outlier(dataset$Fare)
+
+# Hampel method outlier thresholds
+hampel_outlier(dataset$Fare)
+```
+
+#### Outliers Based on Thresholds
+
+Change column names if using specific columns
+
+```{r eval=FALSE}
+## Set all values above the outlier threshold to the threshold value for all columns
+prep_outliers(data = dataset, input = colnames(select_if(dataset,is.numeric)), method = "hampel", type='stop')
+
+# Set all values above the outlier threshold to the threshold value for Specified columns
+prep_outliers(data = dataset, input = c('Fare','Age'), method = "hampel", type='stop')
+```
+
+## Manage Duplicates
+
+### Count Dupes
+```{r eval=FALSE}
+## Show count of duplicate rows
+nrow(dataset) - nrow(unique(dataset))
+```
+
+
+```{r eval=FALSE}
+## Show all duplicated rows
+head(dataset[duplicated(dataset), ])
+```
+
+### Remove Duplicates
+
+```{r eval=FALSE}
+# Remove duplicate rows
+dataset <- dataset[!duplicated(df), ]
+```
+
+# Synthetic Data Generation 
+
+## charlatan
+
+https://github.com/ropensci/charlatan/blob/master/vignettes/charlatan_vignette.Rmd
+
+
+## `synthpop`
+
+```{r echo=FALSE}
+rm(list = ls())
+```
+
+The 'synthpop' package is great for synthesizing data for statistical disclosure control or creating training data for model development. Other things to note,
+
+- Synthesizing a single table is fast and simple.
+- Watch out for over-fitting particularly with factors with many levels. Ensure the visit sequence is reasonable.
+- You are not constrained by only the supported methods, you can build your own!
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+suppressPackageStartupMessages(library(synthpop))
+suppressPackageStartupMessages(library(tidyverse))
+suppressPackageStartupMessages(library(sampling))
+suppressPackageStartupMessages(library(partykit))
+mycols <- c("darkmagenta", "turquoise")
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "")
+myseed <- 20190226
+```
+
+## Sample data
+
+```{r}
+original.df <- SD2011 %>% dplyr::select(sex, age, socprof, income, marital, depress, sport, nofriend, 
+                                        smoke, nociga, alcabuse, bmi)
+head(original.df)
+```
+
+__The objective of synthesizing data is to generate a data set which resembles the original as closely as possible__, warts and all, meaning also preserving the missing value structure. There are two ways to deal with missing values:
+
+1. impute/treat missing values before synthesis 
+2. synthesize the missing values and deal with the missing later
+
+The second option is generally better since the purpose the data is supporting may influence how the missing values are treated.
+
+Missing values can be simply NA or some numeric code specified by the collection. A useful inclusion is the _syn function allows for different NA types_, for example income, nofriend and nociga features -8 as a missing value. A list is passed to the function in the following form.
+
+```{r}
+# setting continuous variable NA list
+cont.na.list <- list(income = c(NA, -8), nofriend = c(NA, -8), nociga = c(NA, -8))
+```
+
+By not including this the -8's will be treated as a numeric value and may distort the synthesis. After synthesis, there is often a need to post process the data to ensure it is logically consistent. For example, anyone who is married must be over 18 and anyone who doesn't smoke shouldn't have a value recorded for 'number of cigarettes consumed'. These rules can be applied during synthesis rather than needing adhoc post processing.
+
+```{r}
+# apply rules to ensure consistency
+rules.list <- list(marital = "age < 18", nociga = "smoke == 'NO'")
+rules.value.list <- list(marital = "SINGLE", nociga = -8)
+```
+
+The variables in the condition need to be synthesized before applying the rule otherwise the function will throw an error. In this case age should be synthesized before marital and smoke should be synthesized before nociga.
+
+There is one person with a bmi of 450.
+
+```{r}
+SD2011[which.max(SD2011$bmi),]
+```
+
+Their weight is missing from the data set and would need to be for this to be accurate. I don't believe this is correct! So, any bmi over 75 (which is still very high) will be considered a missing value and corrected before synthesis.
+
+```{r}
+# getting around the error: synthesis needs to occur before the rules are applied
+original.df$bmi <- ifelse(original.df$bmi > 75, NA, original.df$bmi)
+```
+
+The data can now be synthesized using the following code.
+
+```{r}
+# synthesise data
+synth.obj <- syn(original.df, cont.na = cont.na.list, rules = rules.list, rvalues = rules.value.list, seed = myseed)
+synth.obj
+```
+
+The `compare` function allows for easy checking of the synthesized data.
+
+```{r fig.height=10}
+# compare the synthetic and original data frames
+compare(synth.obj, original.df, nrow = 4, ncol = 3, cols = mycols)$plot
+
+```
+
+Solid. The distributions are very well preserved. Did the rules work on the smoking variable?
+
+```{r}
+# checking rules worked
+table(synth.obj$syn[,c("smoke", "nociga")])
+```
+
+They did. All non-smokers have missing values for the number of cigarettes consumed.
+
+`compare` can also be used for model output checking. A logistic regression model will be fit to find the important predictors of depression. The depression variable ranges from 0-21. This will be converted to
+
+- 0-7 - no evidence of depression (0)
+- 8-21 - evidence of depression (1)
+
+This split leaves 3822 (0)'s and 1089 (1)'s for modelling.
+
+```{r warning=FALSE}
+#MODEL COMPARISON
+glm1 <- glm.synds(ifelse(depress > 7, 1, 0) ~ sex + age + log(income) + sport + nofriend + smoke + 
+                    alcabuse + bmi, data = synth.obj, family = "binomial")
+summary(glm1)
+```
+
+```{r warning=FALSE}
+# compare to the original data set
+compare(glm1, original.df, lcol = mycols)
+```
+
+While the model needs more work, the same conclusions would be made from both the original and synthetic data set as can be seen from the confidence intervals. Occasionally there may be contradicting conclusions made about a variable, accepting it in the observed data but not in the synthetic data for example. This scenario could be corrected by using different synthesis methods or altering the visit sequence.
+
+## Preserving Count Data
+
+Released population data are often counts of people in geographical areas by demographic variables (age, sex, etc). Some cells in the table can be very small e.g. <5. For privacy reasons these cells are suppressed to protect peoples identity. With a synthetic data, suppression is not required given it contains no real people, assuming there is enough uncertainty in how the records are synthesized.
+
+The existence of small cell counts opens a few questions,
+
+1. If very few records exist in a particular grouping (1-4 records in an area) can they be accurately simulated by synthpop?
+2. Is the structure of the count data preserved?
+
+To test this 200 areas will be simulated to replicate possible real world scenarios. Area size will be randomly allocated ensuring a good mix of large and small population sizes. Population sizes are randomly drawn from a Poisson distribution with mean  $\lambda$. If large,  $\lambda$ is drawn from a uniform distribution on the interval [20, 40]. If small, $\lambda$ is set to 1.
+
+```{r}
+# ---------- AREA
+# add area flag to the data frame
+area.label <- paste0("area", 1:200)
+a <- sample(0:1, 200, replace = TRUE, prob = c(0.5, 0.5))
+lambda <- runif(200, 20, 40)*(1-a) + a
+prob.dist <- rpois(200, lambda)
+area <- sample(area.label, 5000, replace = TRUE, prob = prob.dist)
+
+# attached to original data frame
+original.df <- SD2011 %>% dplyr::select(sex, age, socprof, income, marital, depress, sport, nofriend, smoke, nociga, alcabuse, bmi)
+original.df$bmi <- ifelse(original.df$bmi > 75, NA, original.df$bmi)
+original.df <- cbind(original.df, area) %>% arrange(area)
+```
+
+The sequence of synthesizing variables and the choice of predictors is important when there are rare events or low sample areas. If Synthesized very early in the procedure and used as a predictor for following variables, it's likely the subsequent models will over-fit. Synthetic data sets require a level of uncertainty to reduce the risk of statistical disclosure, so this is not ideal.
+
+Fortunately `syn` allows for modification of the predictor matrix. To avoid over-fitting, 'area' is the last variable to by synthesized and will only use sex and age as predictors. This is reasonable to capture the key population characteristics. Additionally, `syn` throws an error unless `maxfaclevels` is changed to the number of areas (the default is 60). This is to prevent poorly synthesized data for this reason and a warning message suggest to check the results, which is good practice.
+
+```{r message=FALSE}
+# synthesise data
+# m is set to 0 as a hack to set the synds object and the predictor matrix
+synth.obj.b <- syn(original.df, cont.na = cont.na.list, rules = rules.list, rvalues = rules.value.list, maxfaclevels = 200, 
+                   seed = myseed, m = 0)
+```
+
+Changing the predictor matrix to predict area with only age and sex
+
+```{r}
+new.pred.mat <- synth.obj.b$predictor.matrix
+new.pred.mat["area",] <- 0
+new.pred.mat["area",c("age", "sex")] <- 1
+new.pred.mat
+```
+
+## Synthesizing New Predictor
+```{r}
+synth.obj.b <- syn(original.df, cont.na = cont.na.list, rules = rules.list, rvalues = rules.value.list, 
+                   maxfaclevels = 200, seed = myseed,
+                   proper = TRUE, predictor.matrix = new.pred.mat)
+```
+
+## Compare Synthetic and Original Data
+```{r}
+compare(synth.obj.b, original.df, vars = "area", nrow = 1, ncol = 1, cols = c("darkmagenta", "turquoise"), stat = "counts")$plot
+```
+
+The area variable is simulated fairly well on simply age and sex. It captures the large and small areas, however the large areas are relatively more variable. This could use some fine tuning, but will stick with this for now.
+
+```{r}
+tab.syn <- synth.obj.b$syn %>% dplyr::select(area, sex) %>% table()
+tab.syn[1:20,]
+```
+----
+```{r}
+tab.orig <- original.df %>% dplyr::select(area, sex) %>% table()
+tab.orig[1:20,]
+```
+
+```{r message=FALSE}
+d <- data.frame(difference = as.numeric(tab.syn - tab.orig), sex = c(rep("Male", 154), rep("Female", 154)))
+
+ggplot(d, aes(x = difference, fill = sex)) + geom_histogram() + facet_grid(sex ~ .) + 
+  scale_fill_manual(values = mycols)
+```
+
+The method does a good job at preserving the structure for the areas. How much variability is acceptable is up to the user and intended purpose. Using more predictors may provide a better fit. The errors are distributed around zero, a good sign no bias has leaked into the data from the synthesis.
+
+```{r}
+tab.syn <- synth.obj.b$syn %>% dplyr::select(area, sex) %>% table()
+
+tab.orig <- original.df %>% dplyr::select(area, sex) %>% table()
+```
+
+The method does a good job at preserving the structure for the areas. How much variability is acceptable is up to the user and intended purpose. Using more predictors may provide a better fit. The errors are distributed around zero, a good sign no bias has leaked into the data from the synthesis.
+
+```{r}
+tab.syn <- synth.obj.b$syn %>% dplyr::select(marital, sex) %>% table()
+tab.syn
+tab.orig <- original.df %>% dplyr::select(marital, sex) %>% table()
+tab.orig
+```
+
+At higher levels of aggregation the structure of tables is more maintained.
+
+This material was derived from here: `synthpop`.
+

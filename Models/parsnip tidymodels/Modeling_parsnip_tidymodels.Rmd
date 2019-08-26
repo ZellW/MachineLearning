@@ -1,0 +1,226 @@
+---
+title: "Modeling parsnip and tidymodels"
+output:
+      prettydoc::html_pretty:
+            theme: Architect
+            highlight: githubb
+---
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+#setwd("~/GitHub/MachineLearning")
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "sf", "lubridate", "tidymodels", "parsnip", prompt = TRUE)
+```
+
+# Introduction
+
+Modeling is pretty much always oriented toward a single purpose — accurate, useful prediction — it’s easy to approach it with a reductive mindset. Even tasks like variable selection and parameter tuning are typically automated or routinized to the point that exploration is all but relegated to the preliminary stages of building a model. Part of the joy of the Tidyverse is that it allows users to be expressive — why can’t modeling be the same?
+
+Enter `tidymodels`, a meta-package that includes a growing set of tools under development by Max Kuhn and his colleagues at RStudio. Along with `parsnip`, which marks an attempt to unify the expansive universe of R modeling packages into a common interface, `tidymodels` provides the tools needed to iterate and explore modeling tasks with a tidy philosophy.
+
+The basic workflow provided by these packages will be explored. The Wisconsin Breast Cancer data set provided by UC Irvine’s Machine Learning Repository, found on Kaggle, will be used. 
+
+# Data
+
+The data consists of 569 observations of cell samples, the physical features of which are summarized by three statistics: mean, standard error, and “worst” — in this case, the largest observed values for each of the features measured. With ten features (such as cell area, concavity, and fractal dimension), there are 30 total predictors in the dataset. Each observation is also labeled with a unique identifier and a diagnosis which will form the target of our prediction: malignant or benign.
+
+```{r}
+data <- read_csv(file_data) %>% select(-X33) %>% rename_all(fix_name) %>% 
+      mutate(diagnosis = case_when(diagnosis == "M" ~ "Malignant", diagnosis == "B" ~ "Benign") )
+
+tidy_data <-data %>% gather( key = measure, value = value, ends_with("mean"), ends_with("se"), ends_with("worst") ) %>%
+  mutate(feature = str_replace(measure, "_[a-z]*$", ""),
+         stat = str_extract(measure, "[a-z]*$") ) %>% 
+      select(id, diagnosis, feature, stat, value)
+```
+
+First, we can see that the distribution of cases is not skewed too much one way or the other. This means that misclassification error should be a decent measure of model performance.
+
+```{r}
+tidy_data %>% count(diagnosis) %>% ggplot(aes(diagnosis, n, fill = diagnosis)) + 
+      geom_col(width = .5, show.legend = FALSE) + 
+      scale_y_continuous(labels = scales::comma) +
+      scale_fill_manual(values = custom_palette[3:2]) +
+      custom_theme + 
+      labs(x = NULL, y = NULL, title = "Distribution of cases")
+```
+
+Because this is a relatively rich but small dataset, thebest practice and try to be picky about which predictors I include. Let’s assume that malignant cancer cells will have several physical differences from benign cells and that our measures will be able to detect these differences. In that case, a ratio of these measures’ means might be a reasonable heuristic for identifying which dimensions exhibit the most difference on average, and thus which measures are likely to have the most predictive power.
+
+```{r}
+tidy_data %>% group_by(diagnosis, feature, stat) %>% summarise(avg = mean(value) ) %>% 
+      ungroup() %>% spread(key = diagnosis, value = avg) %>% 
+      mutate(ratio = Benign/Malignant) %>% arrange(desc(ratio)) %>% 
+      ggplot(aes(reorder(feature, ratio), ratio, color = stat)) + 
+      geom_point() +
+      geom_hline(yintercept = 1, lty = 2, size = .25, color = custom_palette[1]) +
+      coord_flip() + scale_y_continuous(breaks = seq(.25, 1.25, .25), labels = seq(.25, 1.25, .25), limits = c(.25, 1.25) ) +
+      scale_color_manual(values = custom_palette[1:3]) + 
+      custom_theme + labs(x = "Feature", y = "Benign/Malignant Mean Ratio",
+                          title = "How similar are the mesaured features across diagnoses?",
+                          subtitle = "Ratios closer to 1 signify greater similarity",
+                          color = NULL  )
+```
+
+There seems to be a fair amount of separation along measures of area, concavity, and compactness. The average area of a malignant cell sample is nearly twice as large as a benign sample, for instance.
+
+Let’s explore our hunch about separation further by visualizing pairs of these dimensions with scatter plots — which features seem more predictive? Along what dimensions would the diagnoses be easier to predict?
+
+```{r}
+data %>% sample_frac(1) %>% ggplot(aes(smoothness_mean, fractal_dimension_mean, color = diagnosis)) + 
+      geom_point() + scale_color_manual(values = custom_palette[3:2]) + 
+      custom_theme + labs(x = "Smoothness mean", y = "Fractal dimension mean",
+                          color = NULL, title = "Relatively low separation between malignant and benign cells")
+```
+
+```{r}
+data %>% sample_frac(1) %>% ggplot(aes(area_mean, concavity_mean, color = diagnosis)) + 
+      geom_point() +scale_color_manual(values = custom_palette[3:2]) + 
+      custom_theme + labs(x = "Area mean", y = "Concavity mean", color = NULL,
+                          title = "Relatively high separation between malignant and benign cells")
+```
+
+This can also be approached with density plots. Here we can see that the mean and “worst” statistics are likely to be more useful than the standard errors.
+
+```{r}
+tidy_data %>% group_by(feature, stat) %>% mutate(value = scales::rescale(value, c(0, 1)) ) %>% 
+      ggplot(aes(value, fill = diagnosis)) + geom_density(size = 0, alpha = .7) + 
+      facet_grid(feature ~ stat, scales = "free") + 
+      theme(axis.text = element_blank(), axis.ticks = element_blank()) +
+      scale_fill_manual(values = custom_palette[3:2]) +
+      custom_theme + theme(axis.ticks = element_blank(), axis.text = element_blank(),
+                           strip.text.y = element_text(angle = 0), legend.position = "top") +
+      labs(x = NULL, y = NULL, fill = NULL)
+```
+
+# Building the model
+
+Now that we have a sense for which predictors to include, let’s lay out all the steps involved in building a basic predictive model through the tidy appraoch.
+
+First, rsample provides a painless way to create randmoized training and validtion sets from the original data.
+
+```{r}
+# Splitting
+split <- initial_split(data, prop = 3/4)
+train_data <- training(split)
+test_data <- testing(split)
+```
+
+Next, recipes handles the pre-processing. This, in my opinion, is where the real magic of tidymodels comes in. Given a sample of training data, you first specify a model formula using add_role() (or the traditional y ~ x notation). Once roles are assigned, variables can be referenced with dplyr-like helper functions such as all_predictors() or all_nominal() — this comes in handy for the processing steps that follow.
+
+The various step_ functions allow for easy rescaling and transformation, but more importantly they allow you to specify a routine that will consistently reshape all the data you’re feeding into your model. Apart from removing predictors and rescaling values, there are step_ functions for PCA, missing value imputation and more.
+
+## Pre-processing
+
+```{r}
+rec <- train_data %>% recipe() %>% add_role(ends_with("mean"), new_role = "predictor") %>% 
+      add_role(diagnosis, new_role = "outcome") %>% 
+      step_rm(-has_role("outcome"), -has_role("predictor")) %>% 
+      step_center(all_predictors()) %>% step_scale(all_predictors())
+```
+
+Once we’ve created a `recipe()` object, the next step is to `prep()` it. In the baking analogy, the recipe we created is simply a specification for how we want to process our data, and prepping is the process of getting our ingredients and tools in order so that we can bake it. We specify `retain = TRUE` in the prepping process if we want to hold onto the recipe’s initial training data for later.
+
+## Prepping
+```{r}
+prepped <- rec %>% prep(retain = TRUE)
+```
+
+Now that we have a recipe and a prepped object, we’re ready to start baking. The bake() function allows us to apply a prepped recipe to new data, which will be processed according to our exact specifications. The juice() function is essentially a shortcut for bake() that’s useful when we want to process and output the training data used to originally specify the recipe (with retain = TRUE during prepping).
+
+## Baking
+
+```{r}
+train <- prepped %>% juice()
+
+test <- prepped %>% bake(newdata = test_data)
+```
+
+
+Now we’re ready to train our model with parsnip. I won’t say too much about parsnip, which is still in what appears to be a beta mode, but the gist is that like it’s predecessor caret, R users will now be able to specify model families, engines, and arguments through a common interface. In other words, it takes a huge headache out of the model building process. It also has the benefits of working nicely with the tidymodels family, also developed by Max Kuhn and co.
+
+## Model specification
+
+```{r}
+rf_mod <-  rand_forest(mode = "classification", trees = 200)
+
+## Fitting
+rf_fit <- fit(object = rf_mod, formula = formula(prepped), data = train, engine = "randomForest")
+```
+
+Now we have a model fitted to our baked training set!
+
+To see how we did, we can feed a results tibble into `metrics()` and `conf_mat()` from the `yardstick` package, which makes model assessment easy.
+
+## Predicting!
+
+```{r}
+results <- tibble(actual = test$diagnosis, predicted = predict_class(rf_fit, test))
+```
+
+## Assessment -- test error
+
+```{r}
+metrics(results, truth = actual, estimate = predicted) %>% knitr::kable()
+accuracy
+```
+
+```{r}
+conf_mat(results, truth = actual, estimate = predicted)[[1]] %>% as_tibble() %>% 
+  ggplot(aes(Prediction, Truth, alpha = n)) + 
+  geom_tile(fill = custom_palette[4], show.legend = FALSE) +
+  geom_text(aes(label = n), color = "white", alpha = 1, size = 8) +
+  custom_theme + labs(title = "Confusion matrix")
+```
+
+Not bad for a first try! Using a fraction of the original predictors, we’re able to achieve 93.0% accuracy. Of course, this high of a figure is not too surprising given the clean separation we observed during EDA, and we could probably do just as well with even fewer predictors if we wanted. One of the advantages of unifying ever step of the process within a tidy workflow is that it’s easy to step back and make adjustments without rewriting code.
+
+We can further validate our test set accuracy with 10-fold cross validation using rsample to create the folds and purrr to fit all ten models within a nested tibble. One quick note: rather than create 10 tibbles, vfold_cv() creates a list of splits containing the indices for each fold. To get training data from a splits object, simply call analysis(), and to get the test set, call assessment().
+
+## 10-fold cross validation
+
+```{r}
+folds <- vfold_cv(data, v = 10)
+
+folded <- folds %>% 
+      mutate(recipes = splits %>%
+      # Prepper is a wrapper for `prep()` which handles `split` objects
+      map(prepper, recipe = rec), test_data = splits %>% map(analysis),
+      rf_fits = map2(recipes, test_data, ~ fit(
+            rf_mod, formula(.x), data = bake(object = .x, newdata = .y), engine = "randomForest") ) )
+```
+
+Here’s a helper function to create and assess our predictions for each fit, which we can then pmap() with our folded tibble.
+
+## Predict 
+
+```{r}
+predict_rf <- function(split, rec, model) {
+  test <- bake(rec, assessment(split))
+  tibble(actual = test$diagnosis,predicted = predict_class(model, test)  )
+}
+
+predictions <- folded %>% mutate( pred = list(splits, recipes, rf_fits) %>% pmap(predict_rf) )
+```
+
+The last step is to evaluate our performance on each fold. This gives us a bit more confidence in our original estimate of the test error.
+
+## Evaluate
+
+```{r}
+eval <- 
+  predictions %>% mutate(metrics = pred %>% map(~ metrics(., truth = actual, estimate = predicted))  ) %>% 
+  select(metrics) %>% unnest(metrics)
+
+eval %>% knitr::kable()
+accuracy
+```
+
+```{r}
+eval %>% summarise_at(vars(accuracy), funs(mean, sd)) %>% knitr::kable()
+```
+
+#Closing thoughts
+
+This data set turned out to be pretty easy to predict on and we got some satisfying results on the first go-round, but there’s always room for improvement. The beauty of tidymodels is that with the above code as a foundation, it would only take a few lines of edits to change the model type with parsnip, the pre-processing with recipes, or our assessment with yardstick and rsample. While modeling will always be ad hoc by nature, tidymodels opens up the process to greater expressiveness and more purposeful exploration.
