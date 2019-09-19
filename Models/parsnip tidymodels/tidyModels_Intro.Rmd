@@ -1,0 +1,795 @@
+---
+title: '`tidymodels` and More'
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+#table-of-contents h2 {
+  background-color: #4294ce;}
+#table-of-contents{
+  background: #688FAD;}
+#nav-top span.glyphicon{
+  color: #4294ce;}
+#postamble{
+  background: #4294ce;
+  border-top: ;}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo = TRUE,
+    message = FALSE,
+    warning = FALSE)
+```
+
+```{r echo=FALSE, warning=F, message=F}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages('tidymodels', 'dials', 'parsnip', 'modelr', "furrr", "tidyr", prompt = FALSE)
+
+set.seed(123)
+options(digits = 3)
+
+setwd("~/R/Complete")
+```
+
+
+
+```{r helperFunctions}
+
+calc_metrics <- function(model, new_data, truth) {
+    
+    truth_expr <- enquo(truth)
+    
+    suppressWarnings({
+        model %>% predict(new_data = new_data) %>% bind_cols(new_data %>% select(!! truth_expr)) %>%
+            metrics(truth = !! truth_expr, estimate = .pred) %>% select(-.estimator) %>% spread(.metric, .estimate)})
+    }
+
+plot_predictions <- function(model, new_data) {
+    
+    suppressWarnings({
+        g <- model %>% predict(new_data) %>% 
+             bind_cols(new_data %>% 
+                            select(Price_num, Model, Category, ProductFamily, ModelBase, Weight_lb)) %>%
+             rename(Prediction = .pred, Actual = Price_num) %>%
+             mutate(observation = row_number() %>% as.character() %>% as_factor()) %>%
+             gather(key = "key", value = "value", Prediction, Actual, factor_key = TRUE) %>%
+             mutate(key = fct_rev(key)) %>% 
+             mutate(label_text = str_glue("Price: {scales::dollar(value)} ({key})
+                                                                        Model : {Model}
+                                                                        Category: {Category}
+                                                                        ProductFamily: {ProductFamily}
+                                                                        Weight: {Weight_lb} lbs")) %>%
+            
+            # Visualize
+            ggplot(aes(x = observation, y = value, color = key, text = label_text)) + geom_point(size = 4) +
+            expand_limits(y = 0) + theme_tq() + scale_color_tq() + coord_flip() + 
+             labs(title = "Prediction vs Actual")})
+    
+    ggplotly(g, tooltip = "text")}
+```
+
+# Introduction
+
+```{r, out.width = "600px", echo=FALSE}
+knitr::include_graphics("./images/tidymodels.JPG")
+```
+
+`tidymodels` installs and attaches `broom`, `dplyr`, `ggplot2`, `infer`, `purrr`, `recipes`, `rsample`, `tibble`, and `yardstick.`
+
+This document will also introduce `dials`, `parsnip`, and `modelr`.
+
+In a way, the Model step itself has sub-steps. For these sub-steps, `tidymodels` provides one or several packages. This article will showcase functions from several `tidymodels` packages:
+
+- __rsample__ - Different types of re-samples
+- __recipes__ - Transformations for model data pre-processing
+  - __embed__ is a [package](https://github.com/tidymodels/embed) that contains extra steps for `recipes` for embedding predictors into one or more numeric columns. [Hint:  s`tep_lencode_mixed()` is much much faster and gets almost the same results as `step_lencode_glm()`]
+- __yardstick__ - Measure model performance
+- __broom__ -  Takes the messy output of built-in functions in R, such as `lm`, `nls`, or `t.test`, and turns them into tidy data frames.
+- __dials__ - A framework for describing and querying tuning parameters that works with `parsnip`.
+- __parsnip__ -  Standardizes the interfaces for specific models across R packages and computational engines.
+- __modelr__ - Fit models inside the database. modeldb works with most databases back-ends because it leverages dplyr and dbplyr for the final SQL translation of the algorithm. It currently supports K-means clustering and Linear regression
+
+# Pre-Processing
+
+## rsample
+
+`initial_split()` is specially built to separate the data set into a training and testing set. By default, it holds 3/4 of the data for training and the rest for testing. That can be changed by passing the `prop` argument. This function generates an `rplit` object, not a data frame. The printed output shows the row count for testing, training, and total.
+
+```{r}
+iris_split <- initial_split(iris, prop = 0.8)
+iris_split
+```
+
+To access the observations reserved for training, use `training()`. Similarly, use `testing()` to access the testing data.
+
+```{r}
+iris_split %>% training() %>% glimpse()
+```
+
+## recipes
+
+Reference:  https://cran.r-project.org/web/packages/recipes/vignettes/Simple_Example.html
+
+In `tidymodels`, `recipes` provides an interface that specializes in data pre-processing. Within the package, the functions that start, or execute, the data transformations are named after cooking actions. That makes the interface more user-friendly.
+
+The three main functions are `recipe()`, `prep`(), and `bake()`.
+
+`recipe()` defines the operations on the data and the associated roles. Once the preprocessing steps are defined, any parameters are estimated using `prep()`. Once the data are ready for transformation, `bake()`  applies the operations.
+
+Each data transformation is a step. Functions correspond to specific types of steps, each of which has a prefix of step_. There are several step_ functions; in this example, we will use three of them:
+
+- `step_corr()` - Removes variables that have large absolute correlations with other variables
+- `step_center()` - Normalizes numeric data to have a mean of zero
+- `step_scale()` - Normalizes numeric data to have a standard deviation of one
+
+Another feature is that the step can be applied to a specific variable, groups of variables, or all variables. `all_outocomes()` and `all_predictors()` provide a very convenient way to specify groups of variables. For example, if we want the `step_corr()` to only analyze the predictor variables, use `step_corr(all_predictors())`. This capability saves us from having to enumerate each variable.
+
+In the following example, put together the `recipe()`, `prep()`, and `step()` to create a recipe object. The `training()` function is used to extract that data set from the previously created split sample data set.
+
+```{r message=FALSE}
+iris_recipe <- training(iris_split) %>% 
+  recipe(Species ~.) %>% 
+  step_corr(all_predictors()) %>%
+  step_center(all_predictors(), -all_outcomes()) %>% 
+  step_scale(all_predictors(), -all_outcomes()) %>%
+  prep()
+```
+
+`iris_recipe` will print details about the recipe. One of the operations entries in the example explains that the correlation step removed the `Petal.Length` variable.
+
+```{r}
+iris_recipe
+```
+
+Can add an operation to impute the predictors. There are many ways to do this and recipes includes a few steps for this purpose:
+
+```{r}
+grep("impute$", ls("package:recipes"), value = TRUE)
+```
+
+Example:  K-nearest neighbor imputation will be used. This works for both numeric and non-numeric predictors and defaults K to 5 To do this, it selects all predictors and then removes those that are numeric:
+
+```{r eval=FALSE}
+# recipes had check options (check_cols, check_missing, check_name, check_range and check_type
+trained_rec <- trained_rec %>% check_missing(contains("Marital")) # seems like there are easier ways;)
+
+imputed <- rec_obj %>% step_knnimpute(all_predictors()) 
+imputed
+```
+
+The testing data can now be transformed using the exact same steps, weights, and categorization used to pre-process the training data - `bake()`. Notice `testing()` is used in order to extract the appropriate data set.
+
+```{r}
+iris_testing <- iris_recipe %>% bake(testing(iris_split)) 
+glimpse(iris_testing)
+```
+
+Alternatively, load the prepared training data into a variable, use `juice()`. It will extract the data from the `iris_recipe` object.
+
+```{r}
+iris_training <- juice(iris_recipe)
+
+glimpse(iris_training)
+```
+
+What is the difference between bake and juice?
+
+From this perspective given the training data, following data frames are the same:
+
+```{r}
+
+tmpTest1 = bake(iris_recipe, new_data = training(iris_split))
+tmpTest2 = juice(iris_recipe) # with retain=T
+
+identical(tmpTest1, tmpTest2)
+```
+
+> `juice` is confusing - prefer issuing `bake` on test and train - just less confusing.
+
+### New values
+
+If data may change in the future, for example a new value for the `iris$species`, add `step_novel` to the recipe:
+
+
+```{r eval=FALSE}
+iris_recipe <- training(iris_split) %>% 
+  recipe(Species ~.) %>% 
+  step_novel(Species) %>% 
+  step_corr(all_predictors()) %>%
+  step_center(all_predictors(), -all_outcomes()) %>% 
+  step_scale(all_predictors(), -all_outcomes()) %>%
+  prep()
+```
+
+`Species_new` will be added created with all zeros.  This ensures the recipe will run well in Production.
+
+### `embed`
+
+`embed` extends `recipes` with ways to effectively deal with factors with high cardinality.
+
+`embed` functions  uses generalized linear models to estimate the effect of each level of a factor predictor on the outcome. These values are retained to serve as the new encodings for the factor levels. This is sometimes referred to as _likelihood encodings_. `embed` has two estimation methods for accomplishing this:
+
+- with pooling: This method estimates the effects by using all of the locations at once using a hierarchical Bayesian generalized linear model.
+- without pooling: the effect of each factor can be estimated separately for each factor level
+
+`okc` data from `embed` are used to predict whether a person is in the STEM fields (science, technology, engineering, and mathematics). One predictor, geographic location, is a factor variable. The frequencies of location in the data set used here vary between 1 person and 31064 per location. There are 135 locations in the data. Rather than producing 134 indicator variables for a model, a single numeric variable can be used to represent the effect or impact of the factor level on the outcome. In this case, where a factor outcome is being predicted (STEM or not), the effects are quantified by the log-odds of the location for being STEM.
+
+#### Without Pooling
+
+```{r}
+library(tidymodels)
+library(embed)
+data(okc)
+
+# a recipe is created and step_lencode_glm is used:
+
+okc_glm <- recipe(Class ~ ., data = okc) %>%
+  # specify the variable being encoded and the outcome
+  step_lencode_glm(location, outcome = vars(Class)) %>%
+  # estimate the effects
+  prep(training = okc)
+
+# tidy method can be used to extract the encodings and merged with the raw estimates:
+
+glm_estimates <- tidy(okc_glm, number = 1) %>% dplyr::select(-terms, -id) %>% 
+  set_names(c("location", "glm"))
+head(glm_estimates)
+
+```
+
+> There is also a effect that is used for a novel location for future data sets that is the average effect - its there without any additional coding
+
+#### With Pooling
+
+There are a few methods to perform this.  `step_lencode_mixed` is selected as the solution.  The other methods provided similar results.
+
+```{r}
+okc_mixed <- recipe(Class ~ ., data = okc) %>% 
+  step_lencode_mixed(location, outcome = vars(Class),  ) %>% 
+  prep(training = okc)
+
+all_estimates <- tidy(okc_mixed, number = 1) %>% dplyr::select(-terms, -id) %>%
+  set_names(c("location", "mixed")) %>% inner_join(glm_estimates, by = "location")
+
+head(all_estimates)
+```
+
+The values `mixed` and/or `glm` can be used as substitutes for the `location` factor variable in modeling.
+
+> `vtreat` autoamtically performs the embeddings
+
+#### WoE
+
+Weight of evidence encodings for numerical data is also available with `embed.`  `step_woe` creates a specification of a `recipe` step that will transform nominal data into its numerical transformation based on weights of evidence against a binary outcome.
+
+```{r}
+data("credit_data")
+
+set.seed(111)
+credit_split <- initial_split(credit_data, prop = 0.6)
+
+credit_train <- credit_split %>% training()
+credit_test <- credit_split %>% testing()
+
+glimpse(credit_train)
+```
+
+```{r}
+rec <- recipe(Status ~ ., data = credit_train) %>%
+  step_woe(Job, Home, outcome = Status)
+
+woe_models <- prep(rec, training = credit_train)
+
+# the encoding:
+bake(woe_models, new_data = credit_test %>% slice(1:5), starts_with("woe"))
+```
+
+## Model Training
+
+https://www.alexpghayes.com/blog/implementing-the-super-learner-with-tidymodels/
+https://towardsdatascience.com/modelling-with-tidymodels-and-parsnip-bae2c01c131c
+https://github.com/tidyverse/modelr
+https://cran.r-project.org/web/packages/broom/vignettes/broom.html
+https://tidymodels.github.io/dials/articles/Basics.html
+https://www.datisticsblog.com/2018/12/tidymodels/
+
+`tidymodels` provides a single set of functions and arguments to define a model. It then fits the model against the requested modeling package.
+
+One of the great advantage of `tidymodels` is the flexibility and ease of access to every phase of the analysis workflow. Creating the modelling pipeline is a breeze and you can easily re-use the initial framework by changing model type with `parsnip` and data pre-processing with `recipes` and in no time you are ready to check the new models performance with `yardstick.`
+
+In the example below, `rand_forest()` is used to initialize a Random Forest model. To define the number of trees, the trees argument is used. To use the `ranger` version of Random Forest, the `set_engine()` function is used. To execute the model, `fit()` is used. The expected arguments are the formula and data. 
+
+`dials` is used to optimize hyperparamters. Unfortuantely, `dials` has not matured to the point of being useful.  It has been promised for sometime in 2019.
+
+```{r}
+library(dials)
+bst_grid <- grid_random(
+  trees %>%       range_set(c( 1,  100)), 
+  min_n %>%       range_set(c( 2,  30)),
+  mtry %>%        range_set(c(1,10))
+)
+```
+
+```{r}
+iris_ranger <- rand_forest(trees = 100, mode = "classification") %>% set_engine("ranger") %>%
+  fit(Species ~ ., data = iris_training)
+```
+
+The payoff is that if we now want to run the same model against `randomForest`, we simply change the value in `set_engine()` to `randomForest.`
+
+```{r}
+iris_rf <-  rand_forest(trees = 100, mode = "classification") %>% 
+  set_engine("randomForest") %>%  fit(Species ~ ., data = iris_training)
+```
+
+It is also worth mentioning that the model is not defined in a single, large function with a lot of arguments. The model definition is separated into smaller functions such as `fit()` and `set_engine()`. This allows for a more flexible - and easier to learn - interface.
+
+### Predictions
+
+Instead of a vector, `predict()` ran against a `parsnip` model returns a tibble. By default, the prediction variable is called `.pred_class`. In the example, notice that the baked testing data is used.
+
+```{}
+predict(iris_ranger, iris_testing)
+```
+
+It is very easy to add the predictions to the baked testing data by using dplyrs `bind_cols()`.
+
+```{r}
+iris_ranger %>% predict(iris_testing) %>% bind_cols(iris_testing) %>% glimpse()
+```
+
+## Model Validation
+
+Use `metrics()` to measure the performance of the model. It will automatically choose metrics appropriate for a given type of model. The function expects a tibble that contains the actual results (truth) and what the model predicted (estimate).
+
+```{r}
+iris_ranger %>% predict(iris_testing) %>% bind_cols(iris_testing) %>% metrics(truth = Species, estimate = .pred_class)
+```
+
+Because of the consistency of the new interface, measuring the same metrics against the `randomForest` model is as easy as replacing the model variable at the top of the code.
+
+```{r}
+iris_rf %>% predict(iris_testing) %>% bind_cols(iris_testing) %>% metrics(truth = Species, estimate = .pred_class)
+```
+
+### Per Classifier Metrics
+
+It is easy to obtain the probability for each possible predicted value by setting the type argument to prob. That will return a tibble with as many variables as there are possible predicted values. Their name will default to the original value name, prefixed with `.pred_`.
+
+```{r}
+iris_ranger %>% predict(iris_testing, type = "prob") %>% glimpse()
+```
+
+Again, use `bind_cols()` to append the predictions to the baked testing data set.
+
+```{r}
+iris_probs <- iris_ranger %>% predict(iris_testing, type = "prob") %>% bind_cols(iris_testing)
+glimpse(iris_probs)
+```
+
+Now that everything is in one tibble, it is easy to calculate curve methods. In this case we are using `gain_curve()`.
+
+```{r}
+iris_probs %>% gain_curve(Species, .pred_setosa:.pred_virginica) %>% glimpse()
+```
+
+The curve methods includes `autoplot()` that easily creates a `ggplot2` visualization.
+
+```{r}
+iris_probs %>% gain_curve(Species, .pred_setosa:.pred_virginica) %>% autoplot()
+```
+
+This is an example of a `roc_curve()`. Again, because of the consistency of the interface, only the function name needs to be modified; even the argument values remain the same.
+
+```{r}
+iris_probs %>% roc_curve(Species, .pred_setosa:.pred_virginica) %>% autoplot()
+```
+
+To measure the combined single predicted value and the probability of each possible value, combine the two prediction modes (with and without prob type). In this example, using dplyr `select()` makes the resulting tibble easier to read.
+
+```{r}
+predict(iris_ranger, iris_testing, type = "prob") %>% bind_cols(predict(iris_ranger, iris_testing)) %>%
+  bind_cols(select(iris_testing, Species)) %>% glimpse()
+```
+
+Pipe the resulting table into `metrics()`. In this case, specify `.pred_class` as the estimate.
+
+```{r}
+predict(iris_ranger, iris_testing, type = "prob") %>% bind_cols(predict(iris_ranger, iris_testing)) %>%
+  bind_cols(select(iris_testing, Species)) %>% metrics(Species, .pred_setosa:.pred_virginica, estimate = .pred_class)
+```
+
+# Super learner Example
+
+Super Learner is an ensembling strategy that relies on cross-validation to determine how to combine predictions from many models. `tidymodels` provides low-level predictive modeling infrastructure that makes the implementation rather slick. The goal of this post is to show how you can use this infrastructure to build new methods with consistent, tidy behavior.
+
+The Super Learner is an ensembling strategy with nice optimality properties. It's also not too terrible to implement:
+
+1. Fit a library of predictive models $f_{1},. . . . f_{n}$
+2. Get heldout predictions from $f_{1},. . . . f_{n}$ using k-fold cross-validation
+3. Train a metalearner on the heldout predictions
+
+Then when you want to predict on new data, you first run the data through $f_{1},. . . . f_{n}$, then take these predictions and send them through the metalearner.
+
+> Using the new tidyr pivoting functionality
+
+Further, several `tidymodels` packages are undergoing rapid development and are not particularly stable. Also note that the dials API is likely to change in the near future.
+
+```{r}
+plan(multicore)  
+
+set.seed(27)  # the one true seed
+
+data <- as_tibble(iris)
+data
+```
+
+We want to predict `Species` based on `Sepal.Length`, `Sepal.Width`, `Petal.Length` and `Petal.Width.` While this data isn't terribly exciting, multiclass classification is the most general case to deal with. 
+
+## Step 1: Fitting Predictive Models
+
+First we need to fit a library of predictive models on the full data set. Use `parsnip` to specify the models, and `dials` to specify hyperparameter grids. Both `parsnip` and `dials` get loaded when you call `library(tidymodels)`.
+
+For now we record the model we want to use. I'm going to fit C5.0 classification trees, where each tree has different hyperparameters:
+
+```{r}
+model <- decision_tree(mode = "classification") %>%  set_engine("C5.0")
+
+model
+```
+
+If you look at `?decision_tree`, you'll see that we need to specify two hyperparameters, `min_n` and `tree_depth`, for the C5.0 engine. To do this create a random hyperparameter grid using `dials.`
+
+```{r}
+# the dials API is the most unstable out of all the tidymodel packages 
+
+hp_grid <- grid_random(
+  min_n %>% range_set(c(2, 20)),
+  tree_depth,
+  size = 10)
+
+hp_grid
+```
+
+Create a tibble with a list-column of completed model specifications (C5.0 trees where we've specified the hyperparameter values). It'll be useful to keep track of precisely which tree we're working with, so we also add a `model_id` column:
+
+```{r}
+spec_df <- tibble(spec = merge(model, hp_grid)) %>% mutate(model_id = row_number())
+
+spec_df
+```
+
+Describe the data design we'd like to use with a `recipe.`  Use the first two principle components:
+
+```{r}
+recipe <- data %>% recipe(Species ~ .) %>% step_pca(all_predictors(), num_comp = 2)
+
+recipe
+```
+
+## PCA Extraction
+
+Fit each of these trees on the full dataset. Use `furrr::future_map()` to do this in parallel.
+
+```{r}
+prepped <- prep(recipe, training = data)
+
+x <- juice(prepped, all_predictors())
+y <- juice(prepped, all_outcomes())
+
+full_fits <- spec_df %>% 
+  mutate(fit = future_map(spec, fit_xy, x, y))
+
+full_fits
+```
+
+## Step 2: Holdout Predictions
+
+Use `rsample` to generate the resampled datasets for 10-fold cross-validation:
+
+```{r}
+folds <- vfold_cv(data, v = 10)
+```
+
+Fit a model on each fold, which is a mapping operation like before. Define a helper that will fit one of the trees (defined by a `parsnip` model specification) on a given fold, and pass the data in the form of a trained `recipe` object, which we call `prepped`:
+
+```{r}
+fit_on_fold <- function(spec, prepped) {
+  
+  x <- juice(prepped, all_predictors())
+  y <- juice(prepped, all_outcomes())
+  
+  fit_xy(spec, x, y)
+}
+```
+
+Create a tibble containing all combinations of the cross-validation resamples and all the tree specifications:
+
+```{r}
+crossed <- crossing(folds, spec_df)
+crossed
+```
+
+The fitting procedure is then the longest part of the whole process, and looks like:
+
+```{r}
+cv_fits <- crossed %>%
+  mutate(
+    prepped = future_map(splits, prepper, recipe),
+    fit = future_map2(spec, prepped, fit_on_fold)
+  )
+```
+
+Need to get holdout predictions. Each fit was trained on the _analysis()_ set, but want to get holdout predictions using the `assessment()` set. Define a prediction helper function that includes the original row number of each prediction:
+
+```{r}
+predict_helper <- function(fit, new_data, recipe) {
+  
+  # new_data can either be an rsample::rsplit object
+  # or a data frame of genuinely new data
+  
+  if (inherits(new_data, "rsplit")) {
+    obs <- as.integer(new_data, data = "assessment")
+    
+    # never forget to bake when predicting with recipes!
+    new_data <- bake(recipe, assessment(new_data))
+  } else {
+    obs <- 1:nrow(new_data)
+    new_data <- bake(recipe, new_data)
+  }
+  
+  # if you want to generalize this code to a regression
+  # super learner, you'd need to set `type = "response"` here
+  
+  predict(fit, new_data, type = "prob") %>% 
+    mutate(obs = obs)
+}
+```
+
+Use the helper to get predictions for each fold, for each hyperparameter combination. The `preds` column will be a list-column, so `unnest()` to take a look.
+
+```{r}
+holdout_preds <- cv_fits %>% 
+  mutate(preds = future_pmap(list(fit, splits, prepped), predict_helper)  )
+
+holdout_preds %>% unnest(preds)
+```
+
+Shape this into something to train a metalearner on, which means:
+
+- 1 row per original observation
+- 1 column per regression tree and outcome category
+
+Getting data into this kind of tidy format is exactly what `tidyr` excels at. Need to go from a long format to a wide format, which will often be the case when working with models in list `columns1`.
+
+The new `pivot_wider()` solves this:
+
+- The row number of each observation in the original dataset is in the `obs` column
+- The `.pred_*` columns contain the values of interest
+- The `model_id` column identifies what the names of the new columns should be
+
+Need to use this operation over and over again, so put it into a function.
+
+```{r}
+spread_nested_predictions <- function(data) {
+  data %>% 
+    unnest(preds) %>% 
+    pivot_wider(
+      id_cols = obs,
+      names_from = model_id,
+      values_from = contains(".pred")
+    )
+}
+
+holdout_preds <- spread_nested_predictions(holdout_preds)
+holdout_preds
+```
+
+Need to join these predictions back to the original dataset using obs to recover the labels.
+
+```{r}
+meta_train <- data %>% 
+  mutate(obs = row_number()) %>% 
+  right_join(holdout_preds, by = "obs") %>% 
+  select(Species, contains(".pred"))
+
+meta_train
+```
+
+## Step 3: Fit Metalearner
+
+Use a multinomial regression as the metalearner. You can use any metalearner.
+
+```{r}
+# these settings correspond to multinomial regression with a small ridge penalty. the ridge penalty makes sure this doesn't explode when the number of columns of heldout predictions is greater than the number of observations in the original data set
+#
+# in practice, want to avoid base learner libraries that large due to difficulties estimating
+# the relative performance of the base learners
+
+metalearner <- multinom_reg(penalty = 0.01, mixture = 0) %>% 
+  set_engine("glmnet") %>% 
+  fit(Species ~ ., meta_train)
+
+metalearner
+```
+
+That's it! We've fit the super learner! Just like the training process, prediction itself proceeds involves two separate stages:
+
+```{r}
+new_data <- head(iris)
+```
+
+```{r}
+# run the new data through the library of base learners first
+base_preds <- full_fits %>% 
+  mutate(preds = future_map(fit, predict_helper, new_data, prepped)) %>% 
+  spread_nested_predictions()
+
+# then through the metalearner
+predict(metalearner, base_preds, type = "prob")
+```
+
+## Putting it Together
+
+Encapsulate all the code into a single function (still relying on the helper functions we defined above).
+
+```{r}
+#' Fit the super learner!
+#'
+#' @param library A data frame with a column `spec` containing
+#'   complete `parsnip` model specifications for the base learners 
+#'   and a column `model_id`.
+#' @param recipe An untrained `recipe` specifying data design
+#' @param meta_spec A singe `parsnip` model specification
+#'   for the metalearner.
+#' @param data The dataset to fit the super learner on.
+#'
+#' @return A list with class `"super_learner"` and three elements:
+#'
+#'   - `full_fits`: A tibble with list-column `fit` of fit
+#'     base learners as parsnip `model_fit` objects
+#'
+#'   - `metalearner`: The metalearner as a single parsnip
+#'     `model_fit` object
+#'
+#'   - `recipe`: A trained version of the original recipe
+#'
+super_learner <- function(library, recipe, meta_spec, data) {
+  
+  folds <- vfold_cv(data, v = 5)
+  
+  cv_fits <- crossing(folds, library) %>%
+    mutate(
+      prepped = future_map(splits, prepper, recipe),
+      fit = future_pmap(list(spec, prepped), fit_on_fold)
+    )
+  
+  prepped <- prep(recipe, training = data)
+  
+  x <- juice(prepped, all_predictors())
+  y <- juice(prepped, all_outcomes())
+  
+  full_fits <- library %>% 
+    mutate(fit = future_map(spec, fit_xy, x, y))
+  
+  holdout_preds <- cv_fits %>% 
+    mutate(
+      preds = future_pmap(list(fit, splits, prepped), predict_helper)
+    ) %>% 
+    spread_nested_predictions() %>% 
+    select(-obs)
+  
+  metalearner <- fit_xy(meta_spec, holdout_preds, y)
+  
+  sl <- list(full_fits = full_fits, metalearner = metalearner, recipe = prepped)
+  class(sl) <- "super_learner"
+  sl
+}
+```
+
+Also write an S3 predict method:
+
+```{r}
+predict.super_learner <- function(x, new_data, type = c("class", "prob")) {
+  
+  type <- rlang::arg_match(type)
+  
+  new_preds <- x$full_fits %>% 
+    mutate(preds = future_map(fit, predict_helper, new_data, x$recipe)) %>% 
+    spread_nested_predictions() %>% 
+    select(-obs)
+    
+  predict(x$metalearner, new_preds, type = type)
+}
+```
+
+The helpers assume that you are working on a classification problem, but other than this we pretty much only rely on the _parsnip_ API. This means we can mix and match parts to our hearts desire and things should still work. For example, we can build off the `parsnip` classification vignette, which starts like so:
+
+```{r}
+data_split <- credit_data %>% 
+  na.omit() %>% 
+  initial_split(strata = "Status", p = 0.75)
+
+credit_train <- training(data_split)
+credit_test  <- testing(data_split)
+
+credit_recipe <- recipe(Status ~ ., data = credit_train) %>%
+  step_center(all_numeric()) %>%
+  step_scale(all_numeric())
+```
+
+Fit a Super Learner based on a stack of `MARS` fits instead of a neural net. Could also mix in other arbitrary `models2`. First we take a moment to set up the specification:
+
+```{r}
+credit_model <- mars(mode = "classification", prune_method = "backward") %>% 
+  set_engine("earth")
+
+credit_hp_grid <- grid_random(
+  num_terms %>% range_set(c(1, 30)),
+  prod_degree,
+  size = 5
+)
+
+credit_library <- tibble(spec = merge(credit_model, credit_hp_grid)) %>% 
+  mutate(model_id = row_number())
+
+credit_meta <- multinom_reg(penalty = 0, mixture = 1) %>% 
+  set_engine("glmnet")
+Now we do the actual fitting and take a quick coffee break:
+credit_sl <- super_learner(
+  credit_library,
+  credit_recipe,
+  credit_meta,
+  credit_train
+)
+```
+
+Since inheriingt the `tidymodels predict()` conventions, getting a holdout ROC curve is as easy as:
+
+```{r}
+pred <- predict(credit_sl, credit_test, type = "prob")
+
+pred %>% 
+  bind_cols(credit_test) %>% 
+  roc_curve(Status, .pred_bad) %>%
+  autoplot()
+```
+
+## Conclusion
+
+If you want to use the Super Learner in practice, I believe the sl3 package is the most actively developed. There's also Eric Polley's classic SuperLearner package, which may be more full featured than sl3 at the moment. Also be sure to check out h2o::automl(), which makes stacking about as painless as can be if you just need results!
+
+## References
+
+1. Laan, Mark J. van der, Eric C Polley, and Alan E. Hubbard. 2007. "Super Learner." https://biostats.bepress.com/cgi/viewcontent.cgi?article=1226&context=ucbbiostat.
+2. Laan, Mark J. van der, and Sherri Rose. 2018. Targeted Learning in Data Science. Springer Series in Statistics. Springer International Publishing. https://doi.org/10.1007/978-3-319-65304-4.
+3. LeDell, Erin. 2015a. "Intro to Practical Ensemble Learning." https://www.stat.berkeley.edu/~ledell/docs/dlab_ensembles.pdf.
+---. 2015b. "Scalable Ensemble Learning and Computationally Efficient Variance Estimation." PhD thesis. https://www.stat.berkeley.edu/~ledell/papers/ledell-phd-thesis.pdf.
+4. Polley, Eric C, and Mark J. van der Laan. 2010. "Super Learner in Prediction." https://biostats.bepress.com/ucbbiostat/paper266/.
+5. Wolpert, David H. 1992. "Stacked Generalization." http://www.machine-learning.martinsewell.com/ensembles/stacking/Wolpert1992.pdf.
+
+# Reference
+
+https://rviews.rstudio.com/2019/06/19/a-gentle-intro-to-tidymodels/

@@ -42,7 +42,7 @@ border-top: ;}
 
 if(!require(easypackages)){install.packages("easypackages")}
 library(easypackages)
-packages("tidyverse", "pasnip", "here",prompt = TRUE)
+packages("tidyverse", "parsnip", "here",prompt = TRUE)
 setwd("~/GitHub/MachineLearning")
 ```
 
@@ -63,12 +63,14 @@ calc_metrics <- function(model, new_data, truth) {
 plot_predictions <- function(model, new_data) {
     
     suppressWarnings({
-        g <- model %>% predict(new_data) %>% bind_cols(new_data %>% 
-                                                            select(Price_num, Model, Category, ProductFamily, ModelBase, Weight_lb)) %>%
+        g <- model %>% predict(new_data) %>% 
+             bind_cols(new_data %>% 
+                            select(Price_num, Model, Category, ProductFamily, ModelBase, Weight_lb)) %>%
              rename(Prediction = .pred, Actual = Price_num) %>%
              mutate(observation = row_number() %>% as.character() %>% as_factor()) %>%
              gather(key = "key", value = "value", Prediction, Actual, factor_key = TRUE) %>%
-             mutate(key = fct_rev(key)) %>% mutate(label_text = str_glue("Price: {scales::dollar(value)} ({key})
+             mutate(key = fct_rev(key)) %>% 
+             mutate(label_text = str_glue("Price: {scales::dollar(value)} ({key})
                                                                         Model : {Model}
                                                                         Category: {Category}
                                                                         ProductFamily: {ProductFamily}
@@ -76,7 +78,8 @@ plot_predictions <- function(model, new_data) {
             
             # Visualize
             ggplot(aes(x = observation, y = value, color = key, text = label_text)) + geom_point(size = 4) +
-            expand_limits(y = 0) + theme_tq() + scale_color_tq() + coord_flip() + labs(title = "Prediction vs Actual")})
+            expand_limits(y = 0) + theme_tq() + scale_color_tq() + coord_flip() + 
+             labs(title = "Prediction vs Actual")})
     
     ggplotly(g, tooltip = "text")}
 ```
@@ -91,15 +94,18 @@ plot_price_vs_weight <- function() {
                                                        Price: {scales::dollar(Price_num)}
                                                        Weight: {Weight_lb} lbs")) %>%
         
-        ggplot(aes(Weight_lb, Price_num, color = Category)) + geom_point(aes(text = label_text)) + geom_smooth(span = 3, se = FALSE) +
+        ggplot(aes(Weight_lb, Price_num, color = Category)) + 
+         geom_point(aes(text = label_text)) + geom_smooth(span = 3, se = FALSE) +
         scale_color_tq() + scale_y_continuous(labels = scales::dollar_format()) + theme_tq() +
-        labs(title = "2019 Cannondale Bicycles: Understanding the Pricing Model", y = "Price (USD)", x = "Weight (lbs)")
+        labs(title = "2019 Cannondale Bicycles: Understanding the Pricing Model", 
+             y = "Price (USD)", x = "Weight (lbs)")
     
     plotly::ggplotly(g, tooltip = "text") %>% layout(legend = list(x = 0.8, y = 0.9))}
 ```
 
-# Modeling Using parsnip
+# Model Preparation
 
+## Load Libraries
 ```{r parsnip}
 # 1.0 Libraries ----
 
@@ -122,147 +128,165 @@ library(rpart.plot)
 library(xgboost)
 
 # Pull in functions
-source("2019_03_13_Learning_Lab_05_Intro_to_Machine_Learning/scripts/plot_price_vs_weight.R")
-source("2019_03_13_Learning_Lab_05_Intro_to_Machine_Learning/scripts/calc_metrics.R")
-source("2019_03_13_Learning_Lab_05_Intro_to_Machine_Learning/scripts/plot_predictions.R")
+# Ensure the function above have been read
+```
 
-# 2.0 Data Setup ----
+## Data Setup
 
+```{r}
 # Price, Model, Product Category, and Weight
 # - Web Scraped from https://www.cannondale.com/en/USA
-price_vs_weight_tbl <- read_csv("2019_03_13_Learning_Lab_05_Intro_to_Machine_Learning/data/price_vs_weight_tbl.csv") 
+price_vs_weight_tbl <- read_csv("data/price_vs_weight_tbl.csv") 
 
 price_vs_weight_tbl
 
-
 # Engineered Features from Model Description
 # - Feature Engineering: 101, Week 3 - Feature Engineering 
-engineered_features_tbl <- read_csv("2019_03_13_Learning_Lab_05_Intro_to_Machine_Learning/data/engineered_features.csv")
+engineered_features_tbl <- read_csv("data/engineered_features.csv")
 
 engineered_features_tbl
+```
 
-# Visualization
+### Data Visualization
 
-plot_price_vs_weight()
-
+```{r}
 # Join data, and remove Product Families with low counts
-# - Data Manipulation: 101, Week 2 - Data Manipulation
 pricing_model_tbl <- price_vs_weight_tbl %>%
     left_join(engineered_features_tbl, by = "row_id") %>%
     filter(!(ProductFamily %in% c("Trail", "TT and TRI")))
 
 pricing_model_tbl
+```
 
+### Data Split
 
-# 3.0 Data Split ----
+```{r}
 # - Splitting Data: Business Analysis with R (101), Week 6 - Machine Learning
 
 set.seed(1)
-split_obj <- rsample::initial_split(pricing_model_tbl, 
-                                    prop   = 0.8, 
-                                    strata = "ModelBase")
+split_obj <- rsample::initial_split(pricing_model_tbl, prop   = 0.8, strata = "ModelBase")
 
 train_tbl <- split_obj %>% training() 
 test_tbl  <- split_obj %>% testing() 
+```
 
-# 4.0 Machine Learning ----
-# - ML Algorithms: Business Analysis with R (101), Week 6 - Machine Learning
-# - Cross Validation & Grid Search: Data Science for Business with R (201), Week 5 - H2O AutoML
+# Machine Learning
 
-# 4.1 Linear Regression (No Engineered Features) ----
-?linear_reg     # Step 1: Pick a parsnip algorithm, & Set key parameters
-?set_engine     # Step 2: Set an engine, Returns a model spec
-?fit.model_spec # Step 3: Fit model specification to data
+## Linear Regression
 
+Linear Regression (No Engineered Features)
+
+1. linear_reg     Step 1: Pick a parsnip algorithm, & Set key parameters
+2. set_engine     Step 2: Set an engine, Returns a model spec
+3. fit.model_spec Step 3: Fit model specification to data
+
+```{r}
 # Specify Model, Set Engine, & Fit Model to Data
-model_01_lm <- linear_reg("regression") %>%
-    set_engine("lm") %>%
-    fit(Price_num ~ Category + ProductFamily + Weight_lb, 
-        data = train_tbl %>% select(-row_id, Model))
+model_01_lm <- linear_reg("regression") %>%  set_engine("lm") %>%
+    fit(Price_num ~ Category + ProductFamily + Weight_lb, data = train_tbl %>% select(-row_id, Model))
+```
 
-# Prediction
-model_01_lm %>% predict(new_data = test_tbl)
+### Prediction
 
-# Visualize Results
-# - Custom Functions: 101 Week 5
-# - Visualization: 101 Weeks 4 & 7
+```{r}
+model_01_lm %>% predict(new_data = test_tbl) %>% head()
+```
+
+### Plot Predictions
+```{r}
 model_01_lm %>% plot_predictions(new_data = test_tbl)
+```
 
-# Calculate Performance
-# - Custom Functions with Tidy Eval: Covered in 201, Week 1
+### Calculate Performance
+
+```{r}
 model_01_lm %>% calc_metrics(new_data = test_tbl, truth = Price_num)
+```
 
+## Linear Regression w/ Engineered Features
 
-# 4.2 Linear Regression w/ Engineered Features ----
-model_02_lm <- linear_reg("regression") %>%
-    set_engine("lm") %>%
+### Model
+```{r}
+model_02_lm <- linear_reg("regression") %>%  set_engine("lm") %>%
     fit(Price_num ~ ., data = train_tbl %>% select(-row_id, -Model))
+```
 
-model_02_lm %>% predict(new_data = test_tbl)
+### Model Predictions
+```{r}
+model_02_lm %>% predict(new_data = test_tbl) %>% head()
+```
 
+### Plot Predictions
+```{r}
 model_02_lm %>% plot_predictions(new_data = test_tbl)
+```
 
+### Model Metrics
+
+```{r}
 model_02_lm %>% calc_metrics(test_tbl, truth = Price_num)
+```
 
-# Explanation
-model_02_lm$fit %>%
-    broom::tidy() %>%
-    arrange(p.value)
-    
+### Model Explanation
 
-# 4.3 Decision Tree ----
+```{r}
+model_02_lm$fit %>% broom::tidy() %>% arrange(p.value) %>% head()
+```    
+
+### Decision Tree
+
+```{r}
 # - Parameters: 101, Week 6
 # - Cross Validation: 201, Week 5
-model_03_rpart <- decision_tree(
-        mode = "regression", 
-        cost_complexity = 0.001,
-        tree_depth = 5, 
-        min_n = 6) %>%
-    set_engine("rpart") %>%
-    fit(Price_num ~ ., data = train_tbl %>% select(-row_id, -Model))
+model_03_rpart <- decision_tree(mode = "regression", cost_complexity = 0.001,
+        tree_depth = 5, min_n = 6) %>%
+    set_engine("rpart") %>% fit(Price_num ~ ., data = train_tbl %>% select(-row_id, -Model))
 
 model_03_rpart %>% calc_metrics(test_tbl, truth = Price_num)
+```
 
+```{r}
 model_03_rpart %>% plot_predictions(new_data = test_tbl)
+```
 
+```{r}
 # Explanation
-model_03_rpart$fit %>%
-    rpart.plot(
-        fallen.leaves = FALSE, 
-        extra = 101, 
-        roundint = FALSE, 
-        main = "Model 03: Decision Tree",
-        cex = 0.8
-    )
+model_03_rpart$fit %>% rpart.plot(fallen.leaves = FALSE, extra = 101, roundint = FALSE, 
+        main = "Model 03: Decision Tree", cex = 0.8)
+```
 
-# 4.4 XGBoost ----
+## XGBoost
+
+### Model
+```{r}
 # - Parameters: 101, Week 6
 # - Cross Validation: 201, Week 5
-model_04_xgboost <- boost_tree(
-        mode = "regression", 
-        mtry = 30, 
-        trees = 500, 
-        min_n = 2, 
-        tree_depth = 6,
-        learn_rate = 0.35, 
-        loss_reduction = 0.0001) %>%
-    set_engine("xgboost") %>%
-    fit(Price_num ~ ., data = train_tbl %>% select(-row_id, -Model))
+model_04_xgboost <- boost_tree(mode = "regression", mtry = 30, trees = 500, min_n = 2, 
+        tree_depth = 6, learn_rate = 0.35, loss_reduction = 0.0001) %>%
+    set_engine("xgboost") %>% fit(Price_num ~ ., data = train_tbl %>% select(-row_id, -Model))
 
 model_04_xgboost %>% calc_metrics(test_tbl, truth = Price_num)
+```
 
+### Plot Predictions
+```{r}
 model_04_xgboost %>% plot_predictions(new_data = test_tbl)
+```
 
+### Model Explanations
+
+```{3}
 # Explanation
 model_04_xgboost$fit %>%
     xgb.importance(model = .) %>%
     xgb.plot.importance(main = "XGBoost Feature Importance")
+```
 
-# 5.0 Conclusions ----
+# Conclusions
 
-# - Best Model - Linear Regression with Engineered Features, XGBoost 2nd
-# - Features 
-#   - "Hi-Mod", "Weight", "Model Base", "Category Road" seem to be globally important
+- Best Model - Linear Regression with Engineered Features, XGBoost 2nd
+- Features 
+  - "Hi-Mod", "Weight", "Model Base", "Category Road" seem to be globally important
 ```
 
 # Reference
