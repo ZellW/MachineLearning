@@ -1,0 +1,192 @@
+---
+title: 'Regularization: LASSO, Ridge, Elastic Net'
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+    toc_float: true
+    toc_collapsed: true
+    toc_depth: 3
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+setwd("~/R/WIP") #change as needed
+
+# options
+options(echo=TRUE)
+options(stringsAsFactors=FALSE)
+
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "glmnet", "ISLR", "caret", "funModeling", prompt = TRUE)
+```
+
+# Quick Introduction
+
+In Machine learning and statistics, a common task is to fit a model to a set of training data. This model can be used later to make predictions or classify new data points.  When the model fits the training data but does not have a good predicting performance and generalization power, there is an overfitting problem.  Overfitting is a phenomenon which occurs when a model learns the detail and noise in the training data to an extent that it negatively impacts the performance of the model on new data. 
+
+There are few ways you can avoid overfitting your model on training data like cross-validation sampling, reducing number of features (step-wise regression), pruning, regularization etc.
+
+Regularization is a technique used to avoid overfitting problems. Regularization adds a penalty as the model complexity increases (more features). Regularization parameter (lambda - $\lambda=0$) penalizes all the parameters except intercept so that model generalizes the data and will not overfit.  This is an effective technique where there are a large number of features.
+
+The consequence of imposing this penalty, is to reduce (i.e. shrink) the coefficient values towards zero. This allows the less influential variables to have a coefficient close to zero or equal zero.
+
+Note that, the shrinkage requires the selection of a tuning parameter ($\lambda$) that determines the amount of shrinkage.
+
+> Selecting a good value for $\lambda$ is critical.
+
+When $\lambda=0$, the penalty term has no effect and ridge regression will produce the classical least square coefficients.  As ?? increases to infinity, the impact of the shrinkage penalty grows and the ridge regression coefficients will get close zero.
+
+Although there are many ways to regularize a model, few of the common ones are:
+
+- L1 Regularization (LASSO - Least Absolute Shrinkage and Selection Operator) adds regularization terms in the model which are function of absolute value of the coefficients of parameters. The coefficient of the parameters can be driven to zero as well during the regularization process. Hence this technique can be used for feature selection and generating s simpler model (fewer features).
+- L2 Regularization (Ridge) adds regularization terms in the model which are function of square of coefficients of parameters. Coefficient of parameters can approach to zero but never become zero.
+- Elastic Nets adds regularization terms in the model which are combination of both L1 and L2 regularization.
+
+> The key difference between L1 and L2 is the penalty term.
+
+> LASSO shrinks the less important feature's coefficient to zero thus, removing some feature altogether. This works well for feature selection when there are a large number of features.
+
+## `glmnet`
+The glmnet function (from the package of the same name) is probably the most used function for fitting the elastic net model in R. (It also fits the LASSO and ridge regression, since they are special cases of elastic net.) 
+
+> Before doing regularized GLM regression scale variables
+
+# Regularization Techniques
+
+## LASSO Regression
+
+LASSO shrinks the regression coefficients toward zero by penalizing the regression model with a penalty term called `L1-norm` (manhattan distance), which is the **sum of the absolute coefficients**.
+
+The penalty has the effect of forcing some of the coefficient estimates, with a minor contribution to the model, to be exactly equal to zero. This means that, LASSO can be also seen as an alternative to the subset selection methods for performing variable selection in order to reduce the complexity of the model.
+
+An advantage of LASSO regression is that it produces simpler and more interpretable models that incorporate a reduced set of the predictors.
+
+## Ridge Regression
+
+Ridge regression shrinks the regression coefficients so that variables, with minor contribution to the outcome, have their coefficients close to zero.
+
+The shrinkage of the coefficients is achieved by penalizing the regression model with a penalty term called `L2-norm` (euclidean distance), which is the **sum of the squared coefficients**.
+
+## LASSO v Ridge
+
+- Ridge regression is highly affected by the scale of the predictors. Therefore, scale the predictors before applying the ridge regression so that all the predictors are on the same scale.  (The standardization of a predictor x, can be achieved using the formula $x = x / sd(x)$. The consequence is all predictors will have a standard deviation of one allowing the final fit to not depend on the scale on which the predictors are measured.)
+
+- Ridge regression performs well when there is a large multivariate data with the number of predictors (p) larger than the number of observations (n).  LASSO fails when $p > n$.
+
+- Ridge regression includes all the predictors in the final model.
+
+- Ridge regression shrinks the coefficients towards zero, but it will not set any of them exactly to zero. LASSO regression  overcomes this.
+
+- LASSO may perform better when some of the predictors have large coefficients and the remaining predictors have very small coefficients.
+
+- Ridge regression will perform better when the outcome is a function of many predictors with coefficients of roughly equal size.
+
+- LASSO may achieve poor results when there is a high degree of collinearity
+
+- Cross-validation methods can be used for identifying which of these two techniques is better on a particular data set.
+
+## Elastic Net
+
+Elastic Net produces a regression model that is penalized with both the L1-norm and L2-norm. The consequence of this is to effectively shrink coefficients (like in Ridge regression) and to set some coefficients to zero (as in LASSO).
+
+Elastic net introduces a hyper-parameter $\alpha$. $\alpha$ takes values between 0 and 1 and controls how much L2 or L1 penalization is used where $Ridge = 0$ and $LASSO = 1$.
+
+# Find Optimal Parameters
+
+This documentation originated with https://quantmacro.wordpress.com/2016/04/26/fitting-elastic-net-model-in-r/
+
+`glmnet` performs cross validation to find  $\lambda$ that returns the smallest possible root mean squared error statistic for a selected  $\alpha$ parameter.  This approach is useful when we decide apriori on what  $\alpha$ we want to use.  If we have resolved to use Ridge regression we can perform cross validation to find optimal  $\lambda$ while keeping  $\alpha$ set to 0.  Alternatively, if we wish to find the optimal  $\lambda$ for the LASSO model we would set the  $\alpha$ parameter equal to 1.
+
+In our case we want to find the optimal  $\lambda$ and  $\alpha$ jointly. For that we will need to use the `caret` package.  Using the `train` function in the `care`t package we can set up a grid of  $\alpha$ and  $\lambda$ values and perform cross validation to find the optimal parameter values.
+
+Below is an example using `Hitters` dataset from `ISLR` package.
+
+```{r}
+mydata <- na.omit(Hitters)
+skimr::skim(mydata)
+```
+
+```{r}
+#df_status(mydata)
+#freq(mydata)
+plot_num(mydata)
+#profiling_num(mydata)
+```
+
+Set $\alpha$ and $\lambda$ grid to search for pair
+```{r}
+lambda_grid <- 10^seq(2, -2, length = 100)
+lambda_grid
+```
+```{r}
+alpha_grid <- seq(0, 1, length = 10)
+alpha_grid
+```
+
+Setup cross validation for `train`
+```{r}
+trnControl <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
+```
+
+Setup search grid
+```{r}
+srchGrd <- expand.grid(.alpha = alpha_grid, .lambda = lambda_grid)
+```
+
+Perform cross validation forecasting Salary
+```{r}
+myTrain <- caret::train(Salary~., data = mydata, method = "glmnet", 
+                 tuneGrid = srchGrd, trControl = trnControl,
+                 standardize = TRUE, maxit = 1000000)
+plot(myTrain)
+```
+
+List of available attributes in `myTrain`
+```{r}
+attributes(myTrain)
+```
+
+Get the best tuning parameters
+```{r}
+myTrain$bestTune
+```
+
+Get the best model with optimal $\alpha$.
+```{r}
+myModel <- myTrain$finalModel
+```
+
+Get coefficients of the final model with optimal $\lambda$.
+```{r}
+coef(myModel, s = myTrain$bestTune$lambda)
+```
+
+4 features are ignored.
+
+# A Return to Multicollinearity
+
+In multiple regression, two or more predictor variables might be correlated with each other. This situation is collinearity.
+
+There is an extreme situation, called multicollinearity, where collinearity exists between three or more variables even if no pair of variables has a particularly high correlation. This means that there is redundancy between predictor variables.
+
+> In the presence of multicollinearity, the solution of the regression model becomes unstable.
+
+For a given predictor (p), multicollinearity can assessed by computing a score called the **variance inflation factor** ( VIF), which measures how much the variance of a regression coefficient is inflated due to multicollinearity in the model.
+
+The smallest possible value of VIF is one (absence of multicollinearity). As a rule of thumb, a VIF value that exceeds 5 or 10 indicates a problematic amount of collinearity.
+
+When faced to multicollinearity, the variables should be removed, since the presence of multicollinearity implies that the information that this variable provides about the response is redundant in the presence of the other variables.
+
+> In a large data set presenting multiple correlated predictor variables, you can perform principal component regression and partial least square regression strategies.
+
+In the data used above, there is strong evidence of multicollinearity.
+
+```{r}
+car::vif(glm(Salary ~ ., data = mydata))
+```
+
+Perhaps the model above can be improved by correcting for multicollinearity.  Many are obvious such as `CAtBat` and CHits` are obviously closely related.
+
+Great exercise for another time.

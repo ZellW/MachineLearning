@@ -7,12 +7,12 @@ output:
 ---
 
 ```{r message=FALSE, warning=FALSE}
-setwd("~/GitHub/MachineLearning/Models/NLP_TextMining/")
+setwd("~/R/Complete")
 if(!require(easypackages)){install.packages("easypackages")}
 library(easypackages)
-packages("tidyverse","gutenbergr", "tidytext", "triebeard", prompt = FALSE)
+packages("tidyverse","gutenbergr", "tidytext", prompt = FALSE)
 
-#devtools::install_github('cttobin/ggthemr')
+#devtools::install_local("C:\\Users\\czbs7d\\Documents\\R\\packagesGithub\\ggthemr-master.zip")
 library(ggthemr)
 ```
 
@@ -20,7 +20,7 @@ library(ggthemr)
 
 # Introduction
 
-Perform a text mining analysis of two philosophical works on the topic of individual liberty: John Locke’s _Second Treatise of Goverenment_ and John Stuart Mill’s _On Liberty_.
+Perform a text mining analysis of two philosophical works on the topic of individual liberty: John Lockes _Second Treatise of Goverenment_ and John Stuart Mills _On Liberty_.
 
 # A brief excursion into political philosophy
 
@@ -39,24 +39,24 @@ Based on these differences, you might expect word usage to differ somewhat betwe
 
 Project Gutenberg has _Second Treatise of Government_ and _On Liberty_ in its free digital archives. Uese `gutenbergr` to download the works.
 
-```{r message=FALSE, warning=FALSE}
+```{r message=FALSE}
 # set plot theme
 ggthemr("dust")
 ```
 
 Use the metadata file from `gutenbergr` to find the ID numbers for _Second Treatise_ and _On Liberty_. 
 
-## Locke.
+## Locke
 
-```{r message=FALSE}
+```{r}
 # Download Second Treatise of Governement
 locke <- gutenberg_download(gutenberg_id = 7370)
 
 # Show a selection of text
-locke %>% select(text) %>% slice(50:56)
+locke %>%  select(text) %>% slice(50:56)
 ```
 
-```{r message=FALSE}
+```{r}
 # Tokenize text and remove stop words
 tidy_locke <- locke %>% 
   unnest_tokens(output = word, input = text, token = "words") %>%
@@ -72,11 +72,11 @@ The sentences have been broken up, or tokenized, into seperate words, and the st
 A few notes about the code in the chunk above:
 
 - there are many other options in the _tidytext::unnest_tokens_ function, including characters, sentences, and paragraphs.
-- used _stringr::str_extract_ function (as suggested in Text Mining with R) to change the output of `unnest_tokens` to include only actual words, and no numbers. Because, counterintuitively, `token = "words"` can also return numbers.
+- used _stringr::str_extract_ function (as suggested in Text Mining with R) to change the output of `unnest_tokens` to include only actual words, and no numbers. Because, counterintuitively, token = "words" can also return numbers.
 
 ## On Liberty.
 
-```{r message=FALSE}
+```{r}
 # Download On Liberty
 mill <- gutenberg_download(gutenberg_id = 34901)
 

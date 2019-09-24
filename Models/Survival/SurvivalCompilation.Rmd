@@ -1,0 +1,622 @@
+---
+title: 'Survival Compilation'
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: hide
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+#table-of-contents h2 {
+  background-color: #4294ce;}
+#table-of-contents{
+  background: #688FAD;}
+#nav-top span.glyphicon{
+  color: #4294ce;}
+#postamble{
+  background: #4294ce;
+  border-top: ;}
+</style>
+
+# Introduction
+
+With roots dating back to at least 1662 when John Graunt, a London merchant, published an extensive set of inferences based on mortality records, Survival Analysis is one of the oldest subfields of Statistics. Basic life-table methods, including techniques for dealing with censored data, were known before 1700. In the early eighteenth century, the old masters, de Moivre working on annuities and Daniel Bernoulli studying competing risks for his work on smallpox inoculation, developed the foundations of time-to-event modeling. Today, survival analysis models are important in Engineering, Insurance, Marketing and Medicine and many more application areas. 
+Survival analysis is used to analyze data in which the time until the event is of interest. The response is often referred to as a failure time, survival time, or event time.
+
+- Germination timing
+- Arrival of a migrant or parasite
+- Dispersal of seeds or offspring
+- Failure time in mechanical systems
+- Response to stimulus
+- Time until tumor recurrence
+- Time until cardiovascular death after some treatment intervention
+- Time until AIDS for HIV patients
+- Time until a machine part fails
+
+# Key Concepts
+
+## Censoring
+
+The term "censoring" refers to incomplete data. Right-censored data is the most common type of censoring in survival datasets. 
+ Incompletely observed responses are censored. If there is no censoring, standard regression procedures could be used.
+
+Censoring is present when we have some information about a subject's event time, but we don't know the exact event time. For the analysis methods we will discuss to be valid, censoring mechanism must be independent of the survival mechanism.
+
+There are generally three reasons why censoring might occur:
+
+- A subject does not experience the event before the study ends 
+- A person is lost to follow-up during the study period  
+- A person withdraws from the study 
+
+These are all examples of right-censoring.
+
+Types of right-censoring
+
+- Fixed type I censoring occurs when a study is designed to end after C years of follow-up. In this case, everyone who does not have an event observed during the course of the study is censored at C years.
+- In random type I censoring, the study is designed to end after C years, but censored subjects do not all have the same censoring time. This is the main type of right-censoring we will be concerned with.
+- In type II censoring, a study ends when there is a prespecified number of events.
+
+Left censoring:
+
+- Occurs when a subject's survival time is incomplete on the left side of the follow-up period e.g. Following up a patient after being tested for an infection, we don't know the exact time of exposure
+
+Regardless of the type of censoring, assume it is non-informative about the event; that is, the censoring is caused by something other than the impending failure.
+
+One feature of survival analysis is that the data are subject to (right) censoring. Example: 
+$2.2; 3+; 8.4; 7.5+$. 
+This means the second observation is larger then 3 but we do not know by how much, etc. These often happen when subjects are still alive when we terminate the study. To handle the two types of observations, we use two vectors, one for the numbers, another one to indicate if the number is a right censored one. In R, we represent the data by
+
+```{r eval=FALSE}
+stime <- c(2.2, 3, 8.4, 7.5)
+status <- c(1,0,1,0)
+```
+
+They are later used as in Surv( stime, status ). 
+
+## Kaplan-Meier Method and Log Rank Test
+
+The Kaplan-Meier estimator is a non-parametric statistic that allows us to estimate the survival function.
+
+> Remember that a non-parametric statistic is not based on the assumption of an underlying probability distribution, which makes sense since survival data has a skewed distribution.
+
+This statistic gives the probability that an individual patient will survive past a particular time `t`. At `t = 0`, the Kaplan-Meier estimator is 1 and with `t` going to infinity, the estimator goes to 0. In theory, with an infinitely large dataset and `t` measured to the second, the corresponding function of `t` versus survival probability is smooth. 
+
+It is further based on the assumption that the probability of surviving past a certain time point `t` is equal to the product of the observed survival rates until time point `t`. More precisely, `S(t`) the survival probability at time `t` is given by $$S(t) = p.1 * p.2 * . * p.t $$ with `p.1` being the proportion of all patients surviving past the first time point, `p.2` being the proportion of patients surviving past the second time point, and so forth until time point `t` is reached. 
+
+It is important to notice that, starting with `p.2` and up to `p.t`, you take only those patients into account who survived past the previous time point when calculating the proportions for every next time point; thus,` p.2`, `p.3`, ., `p.t` are proportions that are conditional on the previous proportions.
+
+In practice, you want to organize the survival times in order of increasing duration first. This includes the censored values. You then calculate the proportions as described above and sum them up to derive `S(t)`. Censored patients are omitted after the time point of censoring, so they do not influence the proportion of surviving patients. 
+
+Use the `log-rank` test to compare survival curves of two groups. The `log-rank` test is a statistical hypothesis test that tests the null hypothesis that survival curves of two populations do not differ. A certain probability distribution, namely a chi-squared distribution, can be used to derive a p-value. Briefly, p-values are used in statistical hypothesis testing to quantify statistical significance. A result with `p < 0.05` is usually considered significant. In our case, `p < 0.05` would indicate that the two treatment groups are significantly different in terms of survival.
+
+## Cox Proportional Hazards Models
+
+Another useful function in the context of survival analyses is the hazard function `h(t)`. It describes the probability of an event or its hazard `h` (again, survival in this case) if the subject survived up to that particular time point ``t. It is a bit more difficult to illustrate than the Kaplan-Meier estimator because it measures the instantaneous risk of death. Nevertheless, you need the hazard function to consider covariates when you compare survival of patient groups. 
+
+> Covariates, also called explanatory or independent variables in regression analysis, are variables that are possibly predictive of an outcome or that you might want to adjust for to account for interactions between variables.
+
+Whereas the `log-rank` test compares two Kaplan-Meier survival curves, which might be derived from splitting a patient population into treatment subgroups, Cox proportional hazards models are derived from the underlying baseline hazard functions of the patient populations in question and an arbitrary number of dichotomized covariates. Again, it does not assume an underlying probability distribution but it *assumes that the hazards of the patient groups you compare are constant over time*. That is why it is called *proportional hazards model*. 
+
+# Relevant R Packages
+
+- survival
+    - The survival package, which began life as an S package in the late '90s, is the cornerstone of the entire R Survival Analysis edifice. Not only is the package itself rich in features, but the object created by the Surv() function, which contains failure time and censoring information, is the basic survival analysis data structure in R.
+    - The default graph generated with the R package survival is ugly and it requires programming skills for drawing a nice looking survival curves. There is no option for displaying the 'number at risk' table.
+- KMsurv
+- Oisurv
+- ggfortify
+    - `ggfortify` enables producing handsome, one-line survival plots with `ggplot2::autoplot`.
+    - `GGally` and `ggfortify` don not contain any option for drawing the 'number at risk' table. (`survminer` provides this feature.  You need also some knowledge in ggplot2 plotting system for drawing a ready-to-publish survival curves.
+- survminer
+    - Contains the function `ggsurvplot()` for easily drawing beautiful and ready-to-publish survival curves using `ggplot2`. `ggsurvplot(`) includes also some options for displaying the p-value and the 'number at risk' table under the survival curves.
+- ranger
+    - `ranger` is well-known for being a fast implementation of the Random Forests algorithm for building ensembles of classification and regression trees. However, `ranger` also builds survival models. Benchmarks indicate that `ranger` is suitable for building time-to-event models with the large, high dimensional data sets important to internet marketing applications. Since `ranger`uses standard `Surv()` `survival` objects, it's an ideal tool for getting acquainted with survival analysis in the in this machine learning age.
+- xts
+    - eXtensible Time Series (xts) is a powerful package that provides an extensible time series class, enabling uniform handling of many R time series classes by extending zoo.
+
+## Load Packages
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr", "dplyr", "ggplot2", "survival", "survminer", "gbm", "pROC", prompt = FALSE)
+```
+
+# Example - Ovarian Data
+
+This dataset comprises a cohort of ovarian cancer patients and respective clinical information, including the time patients were tracked until they either died or were lost to follow-up (`futime`), whether patients were censored or not (`fustat`), patient age, treatment group assignment, presence of residual disease and performance status. 
+
+```{r}
+data(ovarian)
+glimpse(ovarian)
+#str(ovarian, give.attr = FALSE) #learned something - avoids getting excessive output with factor data (nt an issue here)
+```
+
+- futime: Survival times. This is the response variable. 
+- fustat: Indicates if an individual patients' survival time is censored. `fustat` is also the survival status of patients (i.e. the outcome or event). Patients who did not die will be censored after the last day of follow-up  (e.g., a patient with `fustat = 0` (i.e. who survived past the last time point of follow-up) with a follow-up of 100 days will be censored after 100 days (shown as 100+)). This means that fustat also tells whether data of a patient was censored. That is because every patient who did not die will be censored eventually (at least at the end of the study).  Please let me know if this point requires further clarification. 
+- rd: The 26 patients in this study received either one of two therapy regimens (rx)
+- resid.ds: Attending physician assessed the regression of tumors (resid.ds)
+- ecog.ps:  Patients' performance (according to the standardized ECOG criteria; ecog.ps)
+
+Furthermore, you get information on patients age and if you want to include this as a predictive variable eventually, you have to dichotomize continuous to binary values. But what cutoff should you choose for that? Let us look at the overall distribution of age values:
+
+```{r}
+# Dichotomize age and change data labels
+ovarian$rx <- factor(ovarian$rx, levels = c("1", "2"), labels = c("A", "B"))
+ovarian$resid.ds <- factor(ovarian$resid.ds, levels = c("1", "2"), labels = c("no", "yes"))
+ovarian$ecog.ps <- factor(ovarian$ecog.ps, levels = c("1", "2"), labels = c("good", "bad"))
+
+# Data seems to be bimodal
+hist(ovarian$age) 
+```
+
+The obviously bi-modal distribution suggests a cutoff of 50 years. You can use the mutate function to add an additional age_group column to the data frame that will come in handy later on. Also, you should convert the future covariates into factors.
+
+```{r}
+ovarian <- ovarian %>% mutate(age_group = ifelse(age >=50, "old", "young"))
+ovarian$age_group <- factor(ovarian$age_group)
+head(ovarian)
+```
+
+## Survival
+
+Now, you are prepared to create a survival object. It is basically a compiled version of the `futime` and `fustat` columns that can be interpreted by the `survfit function`. A `+` behind survival times indicates censored data points.
+
+```{r}
+# Fit survival data using the Kaplan-Meier method
+surv_object <- Surv(time = ovarian$futime, event = ovarian$fustat)
+surv_object
+```
+
+## Kaplan-Meier
+
+The next step is to fit the Kaplan-Meier curves. You do that by passing `surv_object` to the `survfit` function. You can also stratify the curve depending on the treatment regimen `rx` that patients were assigned to. A `summary(`) of the resulting `fit1` object shows, among other things, survival times, the proportion of surviving patients at every time point, namely your `p.1, p.2, ...` from above and treatment groups.
+
+```{r}
+fit1 <- survfit(surv_object ~ rx, data = ovarian)
+summary(fit1)
+```
+
+You can examine the corresponding survival curve by passing the survival object to the `ggsurvplot` function. The $pval = TRUE$ argument is very useful, because it plots the p-value of a log rank test as well!
+
+```{r fig.height=8}
+ggsurvplot(fit1, title = "Survival Curve", legend = "bottom",
+           pval = TRUE, conf.int = TRUE,
+           risk.table = TRUE, risk.table.y.text.col = TRUE,
+           risk.table.col = "strata")
+```
+
+By convention, vertical lines indicate censored data, their corresponding x values the time at which censoring occurred.
+
+The log-rank p-value of 0.3 indicates a non-significant result if you consider $p < 0.05$ to indicate statistical significance. In this study, none of the treatments examined were significantly superior, although patients receiving treatment B are doing better in the first month of follow-up. What about the other variables?
+
+```{r}
+# Examine prdictive value of residual disease status
+fit2 <- survfit(surv_object ~ resid.ds, data = ovarian)
+ggsurvplot(fit2, data = ovarian, pval = TRUE)
+```
+
+The Kaplan-Meier plots stratified according to residual disease status look a bit different: The curves diverge early and the log-rank test is almost significant. You may argue that a follow-up study with an increased sample size could validate these results, that is, that patients with positive residual disease status have a significantly worse prognosis compared to patients without residual disease.
+
+## Cox Proportional Hazards Model
+
+But is there a more systematic way to look at the different covariates? As you might remember, Cox proportional hazards models allow you to include covariates. You can build Cox proportional hazards models using the `coxph` function and visualize them using `ggforest`. These type of plot is called a forest plot. It shows so-called hazard ratios (HR) which are derived from the model for all covariates that we included in the formula in `coxph`. Briefly, an $HR > 1$ indicates an increased risk of death (according to the definition of `h(t)`) if a specific condition is met by a patient. An $HR < 1$, on the other hand, indicates a decreased risk. 
+
+```{r warning=FALSE}
+# Fit a Cox proportional hazards model
+fit.coxph <- coxph(surv_object ~ rx + resid.ds + age_group + ecog.ps, data = ovarian)
+ggforest(fit.coxph, data = ovarian)
+```
+
+Every HR represents a relative risk of death that compares one instance of a binary feature to the other instance. For example, a hazard ratio of 0.25 for treatment groups tells you that patients who received treatment B have a reduced risk of dying compared to patients who received treatment A (which served as a reference to calculate the hazard ratio). As shown by the forest plot, the respective 95% confidence interval is 0.071 - 0.89 and this result is significant.
+
+Using this model, you can see that the treatment group, residual disease status, and age group variables significantly influence the patients' risk of death in this study. This is quite different from what you saw with the Kaplan-Meier estimator and the log-rank test. Whereas the former estimates the survival probability, the latter calculates the risk of death and respective hazard ratios. Your analysis shows that the results that these methods yield can differ in terms of significance.
+
+# Example:  Veteran Dataset
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("ranger", "ggfortify", prompt = FALSE)
+```
+
+The veteran dataset has the following variables:
+
+- trt: 1=standard 2=test 
+- celltype: 1=squamous, 2=small cell, 3=adeno, 4=large 
+- time: survival time in days 
+- status: censoring status 
+- karno: Karnofsky performance score (100=good) 
+- diagtime: months from diagnosis to randomization 
+- age: in years 
+- prior: prior therapy 0=no, 10=yes
+
+```{r}
+data(veteran)
+head(veteran)
+```
+
+## Kaplan Meier Analysis
+
+First use `Surv()` to build the standard survival object. The variable time records survival time; `status` indicates whether the patient's death was observed (`status = 1`) or that survival time was censored (`status = 0`). Note that a "+" after the time in the print out of `km` indicates censoring.
+
+```{r}
+km <- with(veteran, Surv(time, status))
+head(km,80)
+```
+
+Use the formula `Surv(futime, status) ~ 1` and `survfit()`  to produce the Kaplan-Meier estimates of the probability of survival over time. The times parameter of `summary()`  gives some control over which times to print. Here, it is set to print the estimates for 1, 30, 60 and 90 days, and then every 90 days thereafter. This is the simplest possible model. It only takes three lines of R code to fit it, and produce numerical and graphical summaries.
+
+```{r}
+km_fit <- survfit(Surv(time, status) ~ 1, data = veteran)
+summary(km_fit, times = c(1, 30, 60, 90 * (1:10)))
+```
+```{r}
+autoplot(km_fit)
+```
+
+Nextlook at survival curves by treatment.
+
+```{r}
+km_trt_fit <- survfit(Surv(time, status) ~ trt, data=veteran)
+autoplot(km_trt_fit)
+```
+
+To show one more small exploratory plot, do a little data munging to look at survival by age. First, create a new data frame with a categorical variable `AG` that has values `LT60` and `GT60` which respectively describe veterans younger and older than sixty. Make `trt` and `prior` into factor variables. Note, `survfit()` and `npsurv()` work  fine without this refinement.
+
+```{r}
+vet <- mutate(veteran, AG = ifelse((age < 60), "LT60", "OV60"),
+              AG = factor(AG),
+              trt = factor(trt,labels=c("standard","test")),
+              prior = factor(prior,labels=c("N0","Yes")))
+
+km_AG_fit <- survfit(Surv(time, status) ~ AG, data=vet)
+autoplot(km_AG_fit)
+```
+
+Although the two curves appear to overlap in the first fifty days, younger patients clearly have a better chance of surviving more than a year.
+
+## Cox Proportional Hazards Model
+
+Next fit a Cox Proportional Hazards Model that makes use of all of the covariates in the data set.
+
+```{r}
+# Fit Cox Model
+cox <- coxph(Surv(time, status) ~ trt + celltype + karno + diagtime + age + prior , data = vet)
+summary(cox)
+```
+
+```{r}
+cox_fit <- survfit(cox)
+autoplot(cox_fit)
+```
+
+Note that the model flags small cell type, `adeno` cell type and `karno` as significant. However, some caution needs to be exercised in interpreting these results. While the Cox Proportional Hazard's model is thought to be "robust", a careful analysis would check the assumptions underlying the model. For example, the Cox model assumes that the covariates do not vary with time. *In a vignette [12] that accompanies the survival package Therneau, Crowson and Atkinson demonstrate that the Karnofsky score (karno) is, in fact, time-dependent so the assumptions for the Cox model are not met. The vignette authors go on to present a strategy for dealing with time dependent covariates.*
+
+Data scientists who are accustomed to computing ROC curves to assess model performance should be interested in the Concordance statistic. The documentation for `survConcordance(`) in the `survival`  defines concordance as "the probability of agreement for any two randomly chosen observations, where in this case agreement means that the observation with the shorter survival time of the two also has the larger risk score. The predictor (or risk score) will often be the result of a Cox model or other regression" and notes that: "For continuous covariates concordance is equivalent to Kendall's tau, and for logistic regression is is equivalent to the area under the ROC curve."
+
+To demonstrate using `survival`, along with `ggplot2` and `ggfortify`, fit Aalen's additive regression model for censored data to the veteran data. The documentation states: "The Aalen model assumes that the cumulative hazard `H(t)` for a subject can be expressed as $a(t) + X B(t)$, where `a(t`) is a time-dependent intercept term, `X` is the vector of covariates for the subject (possibly time-dependent), and `B(t`) is a time-dependent matrix of coefficients."
+
+The plots show how the effects of the covariates change over time. Notice the steep slope and then abrupt change in slope of karno.
+
+```{r}
+aa_fit <-aareg(Surv(time, status) ~ trt + celltype +
+                 karno + diagtime + age + prior , 
+                 data = vet)
+aa_fit
+```
+
+```{r}
+autoplot(aa_fit)
+```
+
+# Example: Random Forest
+
+Use `ranger()` to fit a Random Forests Ensemble model to the data. Note however, that there is nothing new about building tree models of survival data. `ranger()` builds a model for each observation in the data set. The next block of code builds the model using the same variables used in the Cox model above and plots twenty random curves along with a curve that represents the global average for all of the patients. 
+
+```{r}
+r_fit <- ranger(Surv(time, status) ~ trt + celltype + 
+                     karno + diagtime + age + prior,
+                     data = vet,
+                     mtry = 4,
+                     importance = "permutation",
+                     splitrule = "extratrees",
+                     verbose = TRUE)
+
+# Average the survival models
+death_times <- r_fit$unique.death.times 
+surv_prob <- data.frame(r_fit$survival)
+avg_prob <- sapply(surv_prob,mean)
+
+# Plot the survival models for each patient
+plot(r_fit$unique.death.times,r_fit$survival[1,], 
+     type = "l", 
+     ylim = c(0,1),
+     col = "red",
+     xlab = "Days",
+     ylab = "survival",
+     main = "Patient Survival Curves")
+
+#
+cols <- colors()
+for (n in sample(c(2:dim(vet)[1]), 20)){
+  lines(r_fit$unique.death.times, r_fit$survival[n,], type = "l", col = cols[n])
+}
+lines(death_times, avg_prob, lwd = 2)
+legend(500, 0.7, legend = c('Average = black'))
+```
+
+The next block of code illustrates how ranger() ranks variable importance.
+
+```{r}
+vi <- data.frame(sort(round(r_fit$variable.importance, 4), decreasing = TRUE))
+names(vi) <- "importance"
+head(vi)
+```
+
+Notice `ranger()` flags `karno` and `celltype` as the two most important; the same variables with the smallest p-values in the Cox model. Also note that the importance results just give variable names and not level names. This is because ranger and other tree models do not usually create dummy variables.
+
+The major use for tree-based models for survival data will be to deal with very large data sets.
+
+Lastly, to provide a comparison of the three survival curves, plot them on the same graph.The following code pulls out the survival data from the three model objects and puts them into a data frame for `ggplot()`.
+
+```{r}
+kmi <- rep("KM", length(km_fit$time))
+km_df <- data.frame(km_fit$time, km_fit$surv, kmi)
+names(km_df) <- c( "Time", "Surv", "Model")
+
+coxi <- rep("Cox", length(cox_fit$time))
+cox_df <- data.frame(cox_fit$time, cox_fit$surv,coxi)
+names(cox_df) <- c("Time", "Surv", "Model")
+
+rfi <- rep("RF", length(r_fit$unique.death.times))
+rf_df <- data.frame(r_fit$unique.death.times, avg_prob,rfi)
+names(rf_df) <- c("Time", "Surv", "Model")
+
+plot_df <- rbind(km_df, cox_df, rf_df)
+
+p <- ggplot(plot_df, aes(x = Time, y = Surv, color = Model))
+p + geom_line()
+```
+
+I put my money on a carefully constructed Cox model that takes into account the time varying coefficients. I suspect that there are neither enough observations nor enough explanatory variables for `ranger()` to do better.
+
+# Example: AIDS Dataset
+
+If you need to predict a time-based event, most common models, whether regression, classification or survival, can get you there but the quality, type of answer, and path taken will vary. 
+
+- A regression model will return a time estimate
+- A classification model will return the probability of an event at x time
+- A survival model will return probabilities of an event not happening over various time frames
+
+This example uses:
+
+1. a survival model using ranger that gives an outcome probability over a time continuum (flipping the non-event to event probability)
+2. a classification model using gbm that measures the probability of the same event happening within x periods 
+
+## The Data
+
+The data is the [AIDS Clinical Trials Group Study 320 Data](http://blog.nus.edu.sg/alexcook/files/2010/12/actg320.txt) from the University of Massachusetts Amherst. The data represents a double-blind, placebo-controlled trial comparing two different sets of medication in HIV-infected patients. The outcome measures the time to AIDS diagnosis or death. 
+
+Download the data set and add the missing column headers.
+
+```{r}
+actg320_colnames <- c('id','time','censor','time_d','censor_d','treatment','treatment_group',
+                      'strat2','sex','raceth','ivdrug','hemophil','karnof','cd4','priorzdv','age')
+actg320 <- read.table('http://blog.nus.edu.sg/alexcook/files/2010/12/actg320.txt', col.names = actg320_colnames)
+glimpse(actg320)
+```
+
+The data set offers two events and two time periods for survival modeling. Focus on the first event (AIDS or death) as it offers a more balanced outcome.
+
+```{r}
+# removing time_d and censor_2 as it has a rarer outcome balance
+actg320 <- actg320[,c('time', 'censor', 'treatment','treatment_group',
+                                 'strat2','sex','raceth','ivdrug','hemophil','karnof','cd4','priorzdv','age')]
+
+set.seed(1234)
+random_splits <- runif(nrow(actg320))
+train_df_official <- actg320[random_splits < .5,]
+validate_df_official <- actg320[random_splits >= .5,]
+```
+
+Take a quick look at the time period range in the training portion of the data:
+
+```{r}
+plot(sort(actg320$time), pch='.', type='o', col='blue', lwd=2 , 
+     main = 'AIDS Clinical Trials Group Study 320 Data \nTime to AIDS diagnosis, death, or censor')
+``` 
+
+To align the survival and the classification models, focus on the probability of reaching event over the first 82 days.
+
+```{r}
+period_choice <- 82 # 103 
+table(train_df_official$time)
+```
+
+Also need to create a classification-centric outcome variable. This will measure how many patients reached event or not within the chosen period. Here  look for a censor feature of 1 (i.e. the event happened) under the chosen period to set the outcome to 1, everything else is set to 0:
+
+```{r}
+# classification data set
+train_df_classificaiton  <- train_df_official 
+train_df_classificaiton$ReachedEvent <- ifelse((train_df_classificaiton$censor==1 & 
+                                                     train_df_classificaiton$time<=period_choice), 1, 0)
+summary(train_df_classificaiton$ReachedEvent)
+```
+```{r}
+validate_df_classification  <- validate_df_official 
+validate_df_classification$ReachedEvent <- ifelse((validate_df_classification$censor==1 & 
+                                                        validate_df_classification$time<=period_choice), 1, 0)
+summary(validate_df_classification$ReachedEvent)
+```
+
+## Survival Modeling Requirements
+
+A survival model needs two outcome variables: 
+
+- a time variable
+- an outcome/event variable
+
+Every observation in the data set needs a time period. The event outcome does not need to be fully known, in contrast with a logistic regression or classification model which requires training on a known outcome. Instead of needing a true/false, sick/healthy, or dead/alive, a survival model uses the concept of the event, something either has happened or we don't know. 
+
+## Model 1: Random Forest 
+
+A random forest survival model offers advantages like capturing non-linear effects that a traditional model cannot do and be easily distributed over multiple cores. Two popular models are `ranger` and `randomForestSRC`.  This example focuses on `ranger` because it does not require additional steps to get it to work on multiple cores. 
+
+Survival models require two values in the `Surv` function, the time period followed by the outcome. 
+
+```{r}
+survival_formula <- formula(paste('Surv(', 'time', ',', 'censor', ') ~ ','treatment+treatment_group',
+                              '+strat2+sex+raceth+ivdrug+hemophil+karnof+cd4+priorzdv+age'))
+
+survival_formula
+## Surv(time, censor) ~ treatment + treatment_group + strat2 + sex + 
+##     raceth + ivdrug + hemophil + karnof + cd4 + priorzdv + age
+survival_model <- ranger(survival_formula,
+               data = actg320,  
+               seed = 1234,
+               importance = 'permutation',
+               mtry = 2,
+               verbose = TRUE,
+               num.trees = 50,
+               write.forest=TRUE)
+
+# print out coefficients
+sort(survival_model$variable.importance)
+```
+
+Look at some probabilities of survival. Look at two patients - row 1 and row 56:
+
+```{r}
+plot(survival_model$unique.death.times, survival_model$survival[1,], type='l', col='orange', ylim=c(0.4,1))
+lines(survival_model$unique.death.times, survival_model$survival[56,], col='blue')
+```
+
+The plots represent the probability of survival/not reaching event over time. In these cases, the <span style="color:orange">orange line</span> has a much higher provability of not being diagnosed with AIDS or dying than the <span style="color:blue">blue line</span>. This can be confusing, but **a survival model yields a probability of NOT reaching event**.
+
+Look at why the model may see the <span style="color:orange">orange line</span> (row 1) with a higher probability of not reaching event than the <span style="colre:blue>blue line</span> (row 56):
+
+```{r}
+actg320[1,]
+```
+```{r}
+actg320[56,]
+```
+
+At a high level, the patient at row 1 is much younger and has a higher Karnofsky Performance Scale (`karnof`).
+
+Plot many other patients by creating a simple loop:
+
+```{r}
+plot(survival_model$unique.death.times, survival_model$survival[1,], type='l', col='orange', ylim=c(0.4,1))
+for (x in c(2:100)) {
+     lines(survival_model$unique.death.times, survival_model$survival[x,], col='red')
+}
+```
+
+## Scoring the Random Forest Survival Model 
+
+Now score the RF survival model for the period in question: 
+
+```{r}
+survival_model <- ranger(survival_formula,
+                data = train_df_official,
+                seed=1234,
+                verbose = TRUE,
+                num.trees = 50,
+                mtry = 2,
+                write.forest=TRUE )
+```
+
+The survival_model object can offer probabilities on periods it has trained on. In order to get that list:
+
+```{r}
+survival_model$unique.death.times
+```
+
+Here is the tricky part, in order to get an AUC score out of a survival model, need to choose the period (82nd day) and reverse the probability - as we are interested in the probability of reaching event versus the probability of not reaching event.
+
+
+
+First get the basic survival prediction using the validation split set and then  flip the probability of the period of choice and get the AUC score:
+
+```{r}
+suvival_predictions <- predict( survival_model, validate_df_official[, c('treatment','treatment_group',
+                                                 'strat2','sex','raceth','ivdrug',
+                                                 'hemophil','karnof','cd4',
+                                                 'priorzdv','age')])
+
+roc(response=validate_df_classification$ReachedEvent, predictor=1 - suvival_predictions$survival[,which(suvival_predictions$unique.death.times==period_choice)])
+```
+
+## Generalized Boosted Regression Model 
+
+Run and score a classification GBM model:
+
+```{r}
+feature_names <- setdiff(names(train_df_classificaiton), c('ReachedEvent', 'time', 'censor'))
+classification_formula <- formula(paste('ReachedEvent ~ ','treatment+treatment_group',
+                                  '+strat2+sex+raceth+ivdrug+hemophil+karnof+cd4+priorzdv+age'))
+set.seed(1234)
+gbm_model = gbm(classification_formula, 
+                data =  train_df_classificaiton,
+                distribution='bernoulli',
+                n.trees=500,         
+                interaction.depth=3,
+                shrinkage=0.01,
+                bag.fraction=0.5,
+                keep.data=FALSE,
+                cv.folds=5)
+
+nTrees <- gbm.perf(gbm_model)
+
+validate_predictions <- predict(gbm_model, newdata=validate_df_classification[,feature_names], type="response", n.trees=nTrees)
+
+roc(response=validate_df_classification$ReachedEvent, predictor=validate_predictions)
+```
+
+# References
+
+- https://rpubs.com/daspringate/survival
+- https://www.datacamp.com/community/tutorials/survival-analysis-R
+- https://rviews.rstudio.com/2017/09/25/survival-analysis-with-r/
+- https://cran.r-project.org/web/packages/HSAUR/vignettes/Ch_survival_analysis.pdf
+- http://www.stat.columbia.edu/~madigan/W2025/notes/survival.pdf
+- http://www.ms.uky.edu/~mai/Rsurv.pdf
+- https://github.com/kassambara/survminer
+- http://amunategui.github.io/survival-ensembles/
+
+# Appendix
+
+There are many packages related to survival analysis.
+
+https://cran.r-project.org/web/views/Survival.html
+
+Further analysis:
+
+https://www.openintro.org/download.php?file=survival_analysis_in_R&referrer=/stat/surv.php
+https://www.youtube.com/watch?v=fTX8GghbBPc
+https://www.youtube.com/watch?v=XFX6ukqHOWM
+https://www.youtube.com/watch?v=qt2ufTPCWwI
+
+Courses
+
+https://www.udemy.com/time-series-analysis-and-forecasting-in-r/
+

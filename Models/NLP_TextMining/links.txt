@@ -1,0 +1,14 @@
+https://medium.com/africa-creates/feature-engineering-on-text-data-using-r-7a90854fbbb7
+https://arxiv.org/ftp/arxiv/papers/1703/1703.09570.pdf
+https://rpubs.com/lmullen/nlp-chapter
+https://github.com/trinker/entity
+https://tensorflow.rstudio.com/categories/examples.html
+https://www.r-bloggers.com/distributional-semantics-in-r-part-2-entity-recognition-w-opennlp/
+https://www.youtube.com/watch?v=0lpQludiI-0
+https://kenbenoit.net/pdfs/text_analysis_in_R.pdf
+https://www.analyticsvidhya.com/blog/2017/12/introduction-computational-linguistics-dependency-trees/
+https://channel9.msdn.com/Events/useR-international-R-User-conferences/useR-International-R-User-2017-Conference/A-Tidy-Data-Model-for-Natural-Language-Processing
+https://taylorwhitten.github.io/blog/Google_NLP_Tutorial
+https://www.tidytextmining.com/
+
+https://www.kaggle.com/rtatman/nlp-in-r-topic-modelling/

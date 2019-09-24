@@ -41,7 +41,7 @@ library(easypackages)
 packages("tidyverse", "MASS", "effects", "car", "foreign", "splines",  prompt = TRUE)
 options(digits = 3)
 
-setwd("~/GitHub/MachineLearning/Models/LogisticRegression")
+setwd("~/R/Complete/")
 ```
 
 # Introduction
@@ -99,7 +99,7 @@ The first step is to explicitly define the ordering of the levels in  the depend
 
 ```{r}
 #Read data file from UCL mAchine learning repository  
-data <- read.table("../data/OrdinalLogisticRegression.txt")
+data <- read.table("data/OrdinalLogisticRegression.txt")
 head(data)
 ```
 ```{r}

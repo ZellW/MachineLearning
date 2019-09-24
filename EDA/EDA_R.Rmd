@@ -1,0 +1,763 @@
+---
+title: "Exploratory Analysis Template"
+output:
+    rmdformats::readthedown:
+      highlight: pygments
+      code_folding: show
+      df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;
+}
+body{ /* Normal  */
+   font-size: 14px;
+}
+td {  /* Table  */
+   font-size: 12px;
+}
+h1 { /* Header 1 */
+font-size: 26px;
+color: #4294ce;
+}
+h2 { /* Header 2 */
+font-size: 22px;
+}
+h3 { /* Header 3 */
+font-size: 18px;
+}
+code.r{ /* Code block */
+  font-size: 12px;
+}
+pre { /* Code block */
+  font-size: 12px
+}
+#table-of-contents h2 {
+background-color: #4294ce;
+}
+#table-of-contents{
+background: #688FAD;
+}
+#nav-top span.glyphicon{
+color: #4294ce;
+}
+#postamble{
+background: #4294ce;
+border-top: ;
+}
+</style>
+
+**To Do List**
+
+1. auditing table to log every data transformation made on the dataset
+2. Null replacement function to log existence and column
+3. Add column name titles to the boxplot loop function - resolved 3/28/18 CW
+4. Look at edarf for inputation and EDA
+5. Revisit automatic datetime identification (maybe using grepl)
+6. Add pirate charts using yarrr package
+7. Consider adding Amelia for imputation method
+8. Evaluate randomForestExplainer, xgboostExplainer and potentially lightgbmExplainer 
+9. Evaluate imputed data using marginplot from VIM https://www.r-bloggers.com/graphical-presentation-of-missing-data-vim-package/
+10.  Consider including methodology to develop testing data.  See https://github.com/trinker/wakefield
+
+--------
+
+# Load Libraries
+
+```{r loadPackages, message=FALSE, warning=FALSE}
+#if(!require(IEDA)){devtools::install_github("krupanss/IEDA")}
+if(!require(easypackages)){install.packages("easypackages")}
+packages("Hmisc", "funModeling", "GGally", "VIM", "DataExplorer", "PerformanceAnalytics", 
+         "corrplot","plyr", "dplyr", "tidyr", "knitr", "mice","kableExtra", "readr", "caret", 
+         "lubridate", "gridExtra","missForest", prompt = FALSE)
+#library(ieda)
+```
+
+> For quick EDA, particulalrly in front of a client, try IEDA
+
+```{r IEDA, eval=FALSE}
+
+#devtools::install_local("C:\\Users\\czbs7d\\Documents\\R\\packagesGithub\\IEDA-master.zip")
+library(IEDA)
+runIEDA()
+```
+
+# Import Data
+
+```{r loadData, echo=FALSE, message=FALSE,warning=FALSE}
+dataset <- read_delim(file.choose() , delim = ",", col_names = TRUE)
+
+## If the dataset has more than 10,000 records, take a sample of 10,000 for use
+if(nrow(dataset) > 10000){dataset = sample_n(dataset, 10000)}
+```
+
+## Replace NULLs with NA
+
+```{r replaceNULLs}
+## Examine columns for NULLs
+#table(dataset[1])
+
+#dplyr statement, take nulls and make them NA. ALSO add a flag column that designates that the row had null
+dataset  <-  dataset %>% replace(.=="NULL", NA)
+df_status(dataset)
+```
+
+## Remove Vars with No Variability
+
+In some situations, data may have a single unique value (i.e. a "zero-variance predictor"). For many models (excluding tree-based models), this may cause the model to crash or the fit to be unstable.
+
+Similarly, predictors might have only a handful of unique values that occur with very low frequencies. The concern is these predictors may become zero-variance predictors when the data are split into cross-validation/bootstrap sub-samples or that a few samples may have an undue influence on the model. These "near-zero-variance" predictors may need to be identified and eliminated prior to modeling.
+
+To identify these types of predictors, the following two metrics can be calculated:
+
+- the frequency of the most prevalent value over the second most frequent value (called the "frequency ratio''), which would be near one for well-behaved predictors and very large for highly-unbalanced data 
+- the *percent of unique values* is the number of unique values divided by the total number of samples (times 100) that approaches zero as the granularity of the data increases
+
+If the frequency ratio is greater than a pre-specified threshold and the unique value percentage is less than a threshold, we might consider a predictor to be near zero-variance.
+
+We would not want to falsely identify data that have low granularity but are evenly distributed, such as data from a discrete uniform distribution. Using both criteria should not falsely detect such predictors.
+
+```{r nearZeroVar}
+nzv <- nearZeroVar(dataset, saveMetrics = TRUE)
+nzv
+rm(nzv)
+```
+If `TRUE` is returned for `zeroVa` or `nzv`, determine if these values should be removed.
+
+```{r removeVarNoVariability}
+#dataset <- dataset[, -nzv]
+```
+
+Collect variables for use in data exploration
+```{r}
+numeric_columns <- colnames(dataset[, sapply(dataset, is.numeric)])
+categorical_columns <- colnames(dataset[, sapply(dataset, is.character)])
+```
+
+# Explore Data
+
+## Columns and Formatting
+```{r}
+## Describe dataset dimensions
+dim(dataset)
+
+## Examine dataset
+df_status(dataset)
+
+#Other
+#summary(dataset)
+```
+
+## Identify Potential ID Columns
+
+```{r IDcol}
+## Parse column name to look for ID to suggest ID columns
+myIDs <- filter(df_status(dataset), grepl("id", variable, ignore.case = TRUE)) %>% select(variable, type, unique)
+myIDs[,1]
+```
+> ID variables rarely useful in algorithm development.  Consider removing from dataset.
+
+```{r removeIDcol}
+if(nrow(myIDs) > 0){dataset <- dataset %>% select(-contains("id"))}
+```
+
+## Select Label
+
+```{r selectLabel}
+myLabel <- "EnterDependentVariableName"
+```
+
+```{r}
+## List columns rank ordered by variability
+rowcount <- nrow(dataset)
+df_status(dataset) %>% select(variable, unique) %>% mutate(rowcount = rowcount, 
+                       Distinct = rowcount/unique) %>% arrange(desc(unique))
+rm(rowcount)
+```
+
+# Date Handling
+
+Date handling tools are part of the lubridate package.
+
+## Convert Date Columns to Standard Format
+
+```{r formatDate}
+## First set the order in which the date parts appear. The package can parse a variety of different formats as long as it knows the order
+
+## ymd("20110604")
+#dataset$Date <- dmy(dataset$Date)
+
+## mdy("06-04-2011")
+#dataset$Date <- dmy(dataset$Date)
+
+## dmy("04/06/2011")
+#dataset$Date <- dmy(dataset$Date)
+
+## Datetimes can also be used, again just supply the order
+
+## ymd_hms("2011-06-04 12:00:00", tz = "Pacific/Auckland")
+#dataset$Date <- ymd_hms(dataset$Date)
+```
+
+### Parse Date Components
+
+```{r parseDate}
+## Parse the converted date column into date components
+
+#dataset$second <- second(dataset$Date)
+
+#dataset$minute <- minute(dataset$Date)
+
+#dataset$hour <- hour(dataset$Date)
+
+#dataset$day <- day(dataset$Date)
+
+#dataset$wday <- wday(dataset$Date)
+
+#dataset$yday <- yday(dataset$Date)
+
+#dataset$week <- week(dataset$Date)
+
+#dataset$month <- month(dataset$Date)
+
+#dataset$year <- year(dataset$Date)
+```
+
+### Intervals
+
+Two dates can be combined to create a saved interval. This is a range of time between a start and end date which can interact with other dates in several ways. Note that intervals always output as a datetime, down to the second. 
+
+```{r dateIntervals}
+## Establish an interval by supplying a start and end date
+#interval <- interval(startdate, enddate) 
+
+## Two intervals can be compared to see if they overlap. This returns a binary result
+#int_overlaps(interval_1, interval_2)
+
+## The time period that two intervals overlap can be automatically calculated. This returns the overlapping interval
+#setdiff(interval_1, interval_2)
+
+## Returns the first date of the interval
+#int_start(interval)
+
+## Returns the last date of the interval
+#int_end(interval)
+
+## Flitps the start and end date of the interval
+#int_flip(interval)
+
+## Shifts the interval forward by the specified amount. Duration can be days or hours
+#int_shift(interval, duration(days = 11))
+
+## tests for the case where two intervals begin or end at the same moment when arranged chronologically. The direction of each interval is ignored. int_align tests whether the earliest or latest moments of each interval occur at the same time
+#int_aligns(interval_1, interval_2))
+```
+
+## Data Conversion Tools
+
+Convert columns if necessary
+
+### Convert Columns to Factors
+
+Factors are used to work with categorical variables, variables that have a fixed and known set of possible values. They are useful for use in regression models because they act as dummy variables, and can also be displayed in a non-alphabetical order.
+
+> Adjust number in filter to change unique count cutoff limit
+
+```{r charTofactor, warning=FALSE}
+## Identify columns to be converted to factors
+temp <- dataset[colnames(dataset[,sapply(dataset,is.character)])] %>% summarise_all(funs(n_distinct(.)))
+factor_columns <- melt(as.data.frame(temp)) %>% filter(value <= 15) %>% select(variable) %>% .[["variable"]] %>% as.character()
+
+## Convert columns to factors if less than 15 unique values
+dataset[factor_columns] <- lapply(dataset[factor_columns], factor)
+rm(temp)
+```
+
+### Additional Data Conversion
+
+> Change column names as needed
+
+```{r otherVarchanges, message=FALSE, warning=FALSE}
+## Integer conversion
+#dataset$Survived <- as.integer(dataset$Survived)
+
+## Date conversion
+#dataset$Survived <- as.Date(dataset$Survived)
+
+## Convert a column to character
+#dataset$status <- as.character(dataset$status)
+
+## Convert a column to factor
+#dataset$Survived <- as.factor(dataset$Survived)
+
+## Convert ALL categorical columns to factors
+#dataset[categorical_columns] <- lapply(dataset[categorical_columns], factor)
+```
+
+# Missing data
+
+## Missing Data Counts
+
+> Replace column names with desired columns to be changed
+
+```{r NAbyCol}
+## Sum of missing values per column
+colSums(is.na(dataset))
+
+## View records containing missing data
+#dataset[!complete.cases(dataset), ]
+```
+
+## Visualize Missing Data Patterns
+
+```{r}
+mice_plot <- aggr(dataset, col=c('navyblue','yellow'),
+                    numbers=TRUE, sortVars=TRUE,
+                    labels=names(dataset), cex.axis=.7,
+                    gap=3, ylab=c("Missing data","Pattern"))
+```
+
+### Percentage of Missing Values Per Feature
+
+```{r}
+plot_missing(dataset)
+```
+
+## Missing Data Handling Options
+
+### Exclude
+
+> Change column names to desired columns
+
+```{r}
+## Omit all incomplete (containing NA) records
+dataset <- na.omit(dataset)
+
+## Drop specific columns with missing data
+#dataset <- dataset[ , !(names(dataset) %in% c("Column1", "Column2"))]
+```
+
+### Impute with Mean
+
+```{r}
+## mean of column
+#dataset$Age[is.na(dataset$Age)] <- mean(dataset$Age, na.rm = TRUE)
+```
+
+### Impute With MICE
+
+MICE assumes that the missing data are Missing at Random (MAR), which means that the probability that a value is missing depends only on observed value and can be predicted using them. It imputes data on a variable by variable basis by specifying an imputation model per variable.
+
+For example: Suppose we have X1, X2..Xk variables. If X1 has missing values, then it will be regressed on other variables X2 to Xk. The missing values in X1 will be then replaced by predictive values obtained. Similarly, if X2 has missing values, then X1, X3 to Xk variables will be used in prediction model as independent variables. Later, missing values will be replaced with predicted values.
+
+By default, linear regression is used to predict continuous missing values. Logistic regression is used for categorical missing values. Once this cycle is complete, multiple data sets are generated. These data sets differ only in imputed missing values. Generally, it's considered to be a good practice to build models on these data sets separately and combining their results.
+
+```{r MICE}
+## Inpute missing data
+#imputed_Data <- mice(dataset, m=5, maxit = 50, method = 'pmm', seed = 500)
+
+#summary(imputed_Data)
+
+## Create density plot of inputed variables. You are looking to be sure the distributions are about equal. Blue represents actual observations.
+#densityplot(imputed_Data)
+
+## Add the inputed data back into the dataset to complete it
+#dataset_mice <- complete(imputed_Data,1)
+```
+
+### Impute With missForest
+
+missForest is an implementation of random forest algorithm. It's a non parametric imputation method applicable to various variable types.It builds a random forest model for each variable. Then it uses the model to predict missing values in the variable with the help of observed values.
+
+Since bagging works well on categorical variable too, we don't need to remove them here.
+
+> It appears `character` variables cause missForest to error
+
+> missForest not a good solution when few distinct values in a column
+
+```{r missForest}
+## Interesting, in the package the function prodNA can be used to randomly introcude NAs
+dataset_mis <- prodNA(dataset, noNA = 0.1)
+dataset_mis <- dataset_mis %>% mutate_if(is.character, is.factor)
+sum(is.na(dataset_mis))
+imputed_Data_missF <- missForest(as.data.frame(dataset_mis))
+sum(is.na(imputed_Data_missF))
+rm(dataset_mis)
+```
+
+#### Impute With Hmisc
+
+aregImpute() allows mean imputation using additive regression, bootstrapping, and predictive mean matching.
+
+In bootstrapping, different bootstrap resamples are used for each of multiple imputations. Then, a flexible additive model (non parametric regression method) is fitted on samples taken with replacements from original data and missing values (acts as dependent variable) are predicted using non-missing values (independent variable).
+
+Then, it uses predictive mean matching (default) to impute missing values. Predictive mean matching works well for continuous and categorical (binary & multi-level)
+
+```{r Hmisc}
+## Testing tool for seeding missing data
+#dataset <- prodNA(dataset, noNA = 0.1)
+
+## Inpute missing data
+#impute_arg <- aregImpute(~ Age + Fare + Sex, data = dataset, n.impute = 5)
+```
+
+# Categorical Data
+
+## Examination
+
+### Glimpse Data in Categorical Columns
+
+```{r}
+glimpse(dataset[,sapply(dataset,is.character)])
+glimpse(dataset[,sapply(dataset,is.factor)])
+```
+
+### Create Frequency Distributions for Categorical Column
+```{r}
+#Not just factors, apply rules
+freq(dataset[,sapply(dataset,is.factor)])
+```
+
+### Count Levels of Factor Variables
+
+> Change column name to column of interest
+
+```{r}
+#Show counts of levels
+lengths(lapply(dataset[categorical_columns], levels))
+```
+
+## Factor Relevel
+
+Examine and re-order factors in the dataset
+
+> Change column name to column of interest
+
+```{r}
+## Show all levels of a factor
+#levels(dataset$Embarked)
+
+## Manually order factors
+#dataset$Embarked <- factor(dataset$Embarked, levels = c("S", "Q", "C"))
+
+## Make a specific factor first
+#dataset$Embarked <- relevel(dataset$Embarked, "Q")
+
+## Reverse the order of the factor
+#dataset$Embarked <- factor(dataset$Embarked, levels=rev(levels(dataset$Embarked)))
+```
+
+# Numerical Data
+
+## Histograms
+Create histograms of each variables distribution
+```{r}
+plot_num(dataset)
+```
+
+## Profile Information
+
+Profile information for each numeric variable
+```{r}
+profiling_num(dataset)
+```
+
+```{r, eval=TRUE, echo=FALSE}
+text_tbl <- data.frame(
+  Item = c("variation_coef", "skewness", "kurtosis"),
+  Definition = c(
+    "A measure of relative variability. It is the ratio of the standard deviation to the mean (average). For example, the expression 'The standard deviation is 15% of the mean'",
+    "Skewness is a measure of symmetry, or more precisely, the lack of symmetry. A distribution, or data set, is symmetric if it looks the same to the left and right of the center point.", 
+    "Kurtosis is a measure of whether the data are heavy-tailed or light-tailed relative to a normal distribution. That is, data sets with high kurtosis tend to have heavy tails, or outliers. Data sets with low kurtosis tend to have light tails, or lack of outliers. A uniform distribution would be the extreme case. The standard normal distribution has a kurtosis of zero. In addition, with the second definition positive kurtosis indicates a heavy-tailed distribution and negative kurtosis indicates a light tailed distribution."
+  )
+)
+
+kable(text_tbl, "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+# Collinearity
+
+### Correlation Matrix
+Compute a correlation matrix using all numeric columns
+```{r, warning=FALSE}
+cor(select_if(dataset,is.numeric), use = "complete.obs")
+```
+
+### Correlation Matrix Visualized
+
+The correlation coefficents can be visualized
+```{r}
+myCOR <- cor(select_if(dataset,is.numeric), use = "complete.obs")
+corrplot.mixed(myCOR, number.cex = .8, tl.pos = "lt")
+```
+
+#### Individual Coefficient Examination
+
+Examine any individual coefficients
+
+> Change column names to columns of interest
+
+```{r}
+#cor.test(dataset$column1, dataset$column2)
+```
+
+Chart additional correlation information
+
+```{r}
+chart.Correlation(select_if(dataset,is.numeric), histogram = TRUE, pch = 19)
+```
+
+### Alternate Visualizations
+
+Alternative correlation plot
+```{r}
+#Alternative method - DataExplorer
+plot_correlation(dataset, type = 'continuous','Review.Date')
+```
+
+Alternative correlation plot- includes categorical variables
+```{r}
+plot_correlation(dataset, use = "pairwise.complete.obs")
+```
+
+Additional Option which includes matrix of p-values
+```{r}
+#rcorr(as.matrix(select_if(dataset,is.numeric)), type="pearson")
+```
+
+### Information Theory
+Additional correlation analysis, based on several information theory metrics between all variables in a data frame and a target variable.
+
+> Change the variable to target variable
+
+```{r}
+#var_rank_info(dataset, "Survived")
+```
+
+# Data Distribution
+
+## Distribution Plots
+
+Distribution plot between input and target variable
+
+Add check if there's a variable that works
+
+```{r}
+## Plot all numeric columns
+try(cross_plot(data=dataset, input=colnames(select_if(dataset,is.numeric)), target= myLabel))
+
+## Call specific columns only
+#cross_plot(data=dataset, input=c("budget", "runtime"), target= target)
+```
+
+## Box Plots
+
+```{r}
+## Plot all numeric columns
+try(plotar(data=dataset, input = colnames(select_if(dataset,is.numeric)), target= myLabel, plot_type="boxplot"))        
+
+## Call specific columns only
+#plotar(data=dataset, input = c("Age", "Fare"), target= target, plot_type="boxplot")
+
+```
+
+### Quantitative Analysis for Binary Outcome
+
+> Input variable must be categorical. Target variable must be binary.
+
+```{r}
+#df_ca = categ_analysis(data = dataset, input = "Sex", target = myLabel)
+
+#head(df_ca)
+```
+
+# Outlier Detection
+
+## Plot Columns to Identify Outliers
+
+> Change the declared y-value to the column of interest
+
+```{r}
+#for (i in 1:length(numeric_columns)){
+#print(numeric_columns[i])
+
+#tempplot <- ggplot(dataset, aes(x = "", y = numeric_columns[i])) + geom_boxplot(outlier.color="red", outlier.shape=8, outlier.size=4) + #scale_y_continuous()
+#}
+```
+
+> Below, change the variable cutOff to meet you needs.  cutOff determines the number of unique 
+values in each numeric column needed to produce a boxplot.
+
+```{r}
+cutOff = 10 #Number of unique values required to output a boxplot
+tmpDF <- dataset[, sapply(dataset, is.numeric)] #get only numeric columns
+tmpDF <- na.omit(tmpDF) #just a check to avoid ggplot messages
+
+#keep cols that meet cutOff requirement
+tmpDF <- tmpDF[, sapply(tmpDF, function(col) length(unique(col))) >= cutOff] 
+tmpDF <- data.frame(tmpDF)
+
+#https://stackoverflow.com/questions/15027659/how-do-you-draw-a-boxplot-without-specifying-x-axis
+plot_data = function (data, column)
+    ggplot(data = data, aes_string(x = factor(0), y = column)) + 
+    geom_boxplot(outlier.color="red", outlier.shape=8, outlier.size=2) + xlab(column) + ylab("")
+
+myplots <- lapply(colnames(tmpDF), plot_data, data = tmpDF)
+myplots
+rm(cutOff, tmpDF, myplots)
+```
+
+
+
+```{r}
+outlierKD <- function(dt, var) {
+     var_name <- eval(substitute(var),eval(dt))
+     na1 <- sum(is.na(var_name))
+     m1 <- mean(var_name, na.rm = T)
+     par(mfrow=c(2, 2), oma=c(0,0,3,0))
+     boxplot(var_name, main="With outliers")
+     hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+     outlier <- boxplot.stats(var_name)$out
+     mo <- mean(outlier)
+     
+     var_name <- ifelse(var_name %in% outlier, NA, var_name)
+     boxplot(var_name, main="Without outliers")
+     hist(var_name, main="Without outliers", xlab=NA, ylab=NA)
+     
+     title("Outlier Check", outer=TRUE)
+     
+     na2 <- sum(is.na(var_name))
+     cat("Outliers identified:", na2 - na1, "n")
+     cat("Propotion (%) of outliers:", round((na2 - na1) / sum(!is.na(var_name))*100, 1), "n")
+     cat("Mean of the outliers:", round(mo, 2), "n")
+     m2 <- mean(var_name, na.rm = T)
+     cat("Mean without removing outliers:", round(m1, 2), "n")
+     cat("Mean if we remove outliers:", round(m2, 2), "n")
+     # response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+     # if(response == "y" | response == "yes"){
+     #      dt[as.character(substitute(var))] <- invisible(var_name)
+     #      assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+     #      cat("Outliers successfully removed", "n")
+     #      return(invisible(dt))
+     # } else{
+     #      cat("Nothing changed", "n")
+     #      return(invisible(var_name))
+     # }
+}
+
+for (i in 1:length(colnames(select_if(dataset,is.numeric)))){
+outlierKD(dataset, get(paste(colnames(select_if(dataset,is.numeric)[i]))))
+}
+```
+
+Examine the top 25 rows of a column containing outliers
+
+> Change the column name to the specified column
+
+```{r}
+#tmpRev <- arrange(dataset, desc(Age)) %>% select(Age)
+#tmpRev <- as.data.frame(head(tmpRev$Age, 25))
+#names(tmpRev) <- "Age"
+#tmpRev
+```
+
+## Outlier Handling Options
+
+### Threshold Based
+
+#### Set Thresholds for Outlier Detection. 
+
+The Tukey method formula: The bottom threshold is: Q1 - 3IQR. All below are considered as outliers. The top threshold is: Q1 + 3(IQR). All above are considered as outliers.
+
+The Hampel method formula: The bottom threshold is: median_value ??? 3(mad_value). All below are considered as outliers. The top threshold is: median_value + 3(mad_value). All above are considered as outliers.
+
+> Change columns to columns of interest
+
+```{r}
+## Tukey method outlier thresholds
+#tukey_outlier(dataset$Fare)
+
+## Hampel method outlier thresholds
+#hampel_outlier(dataset$Fare)
+```
+
+#### Set Outliers Based on Thresholds
+
+> Change column names if using specific columns
+
+```{r}
+## Set all values above the outlier threshold to the threshold value for all columns
+#prep_outliers(data = dataset, input = colnames(select_if(dataset,is.numeric)), method = "hampel", type='stop')
+
+## Set all values above the outlier threshold to the threshold value for Specified columns
+#prep_outliers(data = dataset, input = c('Fare','Age'), method = "hampel", type='stop')
+```
+
+# Duplicates
+
+## Examine Duplicates
+
+### Count Number of Duplicated Rows
+```{r}
+## Show count of duplicate rows
+nrow(dataset) - nrow(unique(dataset))
+```
+
+### Review Duplicate Rows
+
+```{r}
+## Show all duplicated rows
+head(dataset[duplicated(dataset), ])
+```
+
+## Remove Duplicates
+```{r}
+## Remove duplicate rows
+#dataset <- dataset[!duplicated(df), ]
+```
+
+# Additional Testing Tools
+
+```{r}
+data(dataset, package = "reshape")
+pm <- ggpairs(select_if(dataset,is.numeric))
+#pm <- ggpairs(dataset[numeric_columns], columns = c("total_bill", "time", "tip"))
+pm
+```
+
+# Pre Processing
+
+## Dimensionality Reduction (PCA)
+
+## Manage Unbalanced Data
+
+## Feature Engineering
+
+# Useful Code
+
+## Data Munging Tools
+
+```{r}
+## Apply filters based on known business rules
+#data <- filter(dataset, dataset$Number == 0, dataset$Category %in% c("Active", "Complete"))
+
+## Drop unusused columns 
+#data <- dataset[ , !(names(dataset) %in% c("TaskBaselineFinishDate", "TaskBaselineStartDate"))]
+```
+
+## Data Splitting and Grouping Tools
+
+```{r}
+## Filter dataset, group by column and create new aggregate column
+#constructionstart <- builddata %>%
+#  filter(L2Milestone == "Construction Start" | T1Milestone == "Construction Start") %>%
+#  group_by(ProjectID) %>%
+#  summarise(ConstructionStartDate = min(TaskStartDate))
+```

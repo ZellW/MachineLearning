@@ -1,0 +1,333 @@
+---
+title: "spFSR: Feature Selection"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+
+#table-of-contents h2 {background-color: #4294ce;}
+
+#table-of-contents{background: #688FAD;}
+#nav-top span.glyphicon{color: #4294ce;}
+#postamble{background: #4294ce;border-top: ;}
+</style>
+---
+
+# Introduction
+
+Feature selection can be loosely defined as finding an optimal subset of available features in a dataset that are asssociated with the response variable. There are three broad categories of featue selection methods:
+
+1. filter methods:  Filter feature selection methods apply a statistical measure to assign a scoring to each feature. The features are ranked by the score and either selected to be kept or removed from the dataset. The methods are often univariate and consider the feature independently, or with regard to the dependent variable.
+
+  + Some examples of some filter methods include the Chi squared test, information gain and correlation coefficient scores.
+
+2. wrapper methods:  Wrapper methods consider the selection of a set of features as a search problem, where different combinations are prepared, evaluated and compared to other combinations. A predictive model us used to evaluate a combination of features and assign a score based on model accuracy.
+
+  + The search process may be methodical such as a best-first search, it may stochastic such as a random hill-climbing algorithm, or it may use heuristics, like forward and backward passes to add and remove features.
+
+  + An example if a wrapper method is the recursive feature elimination algorithm.
+
+3. embedded methods:  Embedded methods learn which features best contribute to the accuracy of the model while the model is being created. The most common type of embedded feature selection methods are regularization methods.
+
+  + Regularization methods are also called penalization methods that introduce additional constraints into the optimization of a predictive algorithm (such as a regression algorithm) that bias the model toward lower complexity (fewer coefficients).
+
+  + Examples of regularization algorithms are the LASSO, Elastic Net and Ridge Regression.
+
+
+  + Simultaneous Perturbation Stochastic Approximation for Feature Selection and Ranking (SPSA-FSR) Algorithm is one of the wrapper methods. 
+
+Since `spFSR`  depends upon the `mlr`, follow the `mlr` workflow to define a `learner` and a `task`. `spFSR`  supports classification and regression problems. We show how to perform feature selection with `spFSR` with two applications - one classification problem and one regression problem. `spFSR` does not support unsupervised learning (such as clustering), cost-sensitive classification and survival analysis.
+
+# Classification Problem
+
+## Dataset
+
+Using the classical iris data, the goal is to choose 3 of 4 features (`Sepal.Length`, `Sepal.Width`, `Petal.Length`, and `Petal.Width`) that give the highest mean accuracy rate in predicting `Species`.
+
+```{r}
+data(iris)
+head(iris)
+```
+
+## Define Task and Wrapper
+
+After loading `mlr, create a wrapper which is a `knn learner` with` k=5`. Make a classification task by specifying `Species` as the response or target variable we would like to predict. Lastly, specify `acc` (accuracy) to evaluate the wrapper’s performance.
+
+```{r message=FALSE, warning=FALSE}
+library(mlr)
+knnWrapper    <- makeLearner("classif.knn", k = 5) 
+classifTask   <- makeClassifTask(data = iris, target = "Species")
+perf.measure  <- acc
+```
+
+## Select features using `spFeatureSelection`
+
+`spFeatureSelection` function requires four main arguments:
+
+- `task`: a task object created using mlr package. In this example, task = classifTask
+- `wrapper`: a Learner object created using mlr package. In this example, it is wrapper = knnWrapper
+- `measure`: a performance measure supported by task; here, measure = perf.measure
+- `num.features.selected`: number of features to be selected. In this example, we aim to choose three features (num.features.selected = 3).
+
+In addition, due to the stochastic nature of `SPSA-FSR`, we recommend user to run it multiple iterations by specifying `iters.max` in `spFeatureSelection`. The default value of `iters.max` is 25. For illustration,  run up to 10 iterations by specifying `iters.max = 10`. To speed up, user can specify how many processor cores to run the algorithm. The default value is 2 or the minimum core available on the computer. In this example, we apply a single core (`num.cores = 1`).
+
+```{r message=FALSE, warning=FALSE}
+library(spFSR)
+set.seed(123)
+spsaMod <- spFeatureSelection(
+              task = classifTask,
+              wrapper = knnWrapper,
+              measure = perf.measure ,
+              num.features.selected = 3,
+              iters.max = 10,
+              num.cores = 1)
+```
+
+The output above shows that the result produced by `spFeatureSelection`. At each iteration (iter), it shows mean accuracy rate (value) and its standard deviation (st.dev) on three features (num.fit = 3). The best.value represents the best mean accuracy rate produced by `spFeatureSelection`. At the first iteration (iter = 1), the best mean accuracy rate is 0.96 and it is denoted by ’*’. At the second iteration, the mean accuracy rate is lower and hence the accuracy rate from the first iteration remains as the best value. At the third iteration, the accuracy rate improves to 0.97111 which is higher the previous best value. The accuracy rate of the third iteration therefore becomes the best value.
+
+## Generic methods
+
+`spFSR` supports three S3 generic methods: `print`, `summary`, and `plot`. The usages of `print` and `summary` are straighforward. The `summary` return the following information:
+
+```{r}
+summary(spsaMod)
+```
+
+We can produce a scatterplot of mean accuracy rate at each iteration by calling the plot function on `spsaMod`. We can also add an error bar of ±1 standard deviation around the mean accuracy rate at each iteration by specifying `errorBar = TRU`E. Other graphical parameters such as `pch`, `type`, `ylab`, and `col` are supported.
+
+```{r}
+plot(spsaMod, errorBar = TRUE)
+```
+
+## Other functions
+
+`spFSR` package includes:
+
+- `getImportance` which returns the importance ranks of best performing features as a data.frame object
+- `plotImportance` which plots the importance ranks of best performing features
+- `getBestModel` which returns the trained or wrapped model based on the set of best performing features.
+
+```{r}
+getImportance(spsaMod)
+```
+```{r}
+plotImportance(spsaMod)
+```
+
+The vertical bar chart generated by `plotImportance` shows that `Petal.Width` is the most important feature. We can obtain the best performing model by calling `getBestModel`.
+
+```{r}
+bestMod <- getBestModel(spsaMod)
+```
+
+`bestMod` is an object of` WrapperModel` class from `mlr`.
+
+```{r}
+class(bestMod)
+```
+
+It inherits all methods of this class including `predict`. The `predict` function can be used to predict out-of-sample data using setting `new.data` to a test data. It can be also used to return the predicted responses by incorporating the `task = spsaMod$task.spfs` (which contains only the best performing features). The code chunk below illustrates how predicted responses can be obtained and used to calculate the confusion matrix by calling `calculateConfusionMatrix` from `mlr`.
+
+```{r}
+# predict using the best mod
+pred <- predict(bestMod, task = spsaMod$task.spfs )
+```
+```{r}
+# Obtain confusion matrix
+calculateConfusionMatrix( pred )
+```
+
+# Regression Problem
+
+###Dataset
+
+The goal is to select 10 out of 14 features which predict the median house price (medv in USD 1000’s) from the *BostonHosuing* data. The data is loaded from `mlbench`.
+
+```{r message=FALSE, warning=FALSE}
+if( !require(mlbench) ){install.packages('mlbench')}
+library(mlbench)
+data("BostonHousing")
+head(BostonHousing)
+```
+
+## Select features using spFeatureSelection
+
+We start configuring a regression task and a linear regression (lm) wrapper:
+
+```{r}
+regTask    <- makeRegrTask(data = BostonHousing,  target = 'medv')
+regWrapper <- makeLearner('regr.lm')
+```
+
+For a regression problem, stratified sampling is not supported and so `cv.stratify` must be FALSE. We use mean squared error (mse) to evaluate the linear regression’s performance. Similar to the previous example, we shall run up to 10 iterations by specifying `iters.max = 10` on a single core (`num.cores = 1`).
+
+```{r}
+regSPSA <- spFeatureSelection(
+                task = regTask, wrapper = regWrapper,
+                measure = mse, num.features.selected = 10,
+                cv.stratify = FALSE,
+                iters.max = 10,
+                num.cores = 1)
+```
+
+## Methods and functions
+
+The methods and importance functions can be also used for regression problems.
+
+```{r}
+summary(regSPSA)
+```
+```{r}
+getImportance(regSPSA)
+```
+```{r}
+plotImportance(regSPSA)
+```
+
+The importance plot reveals `nox` and `crim` to be two most important features in predicting the median housing value. We can also obtain the best model via `getBestModel` and make predictions.
+
+```{r}
+bestRegMod <- getBestModel(regSPSA)
+predData   <- predict(bestRegMod, task = regSPSA$task.spfs) # obtain the prediction
+```
+
+# Summary
+
+Leveraging `mlr`, `spFSR` implements the SPSA-FSR Algorithm for feature selection. Given a wrapper, `spFSR`  can determine a subset of features which predicts the response variable while optimising a specified performance measure.
+
+# Compare to caret
+
+## Redundant Features
+
+Data can contain attributes that are highly correlated with each other. Many methods perform better if highly correlated attributes are removed.
+
+The Caret R package provides the findCorrelation which will analyze a correlation matrix of your data’s attributes report on attributes that can be removed.
+
+Generally, you want to remove attributes with an absolute correlation of 0.75 or higher.
+
+`iris` does not have enough data to serve as an example for this exercise.  Therefore, an alternative is used to illustrate correlations.
+
+```{r}
+# ensure the results are repeatable
+set.seed(7)
+# load the library
+library(mlbench)
+library(caret)
+library(dplyr)
+# load the data
+data(PimaIndiansDiabetes)
+glimpse(PimaIndiansDiabetes)
+# calculate correlation matrix
+correlationMatrix <- cor(PimaIndiansDiabetes[,1:8])
+# summarize the correlation matrix
+print(correlationMatrix)
+# find attributes that are highly corrected (ideally >0.75)
+highlyCorrelated <- findCorrelation(correlationMatrix, cutoff=0.5)
+# print indexes of highly correlated attributes
+print(highlyCorrelated)
+colnames(PimaIndiansDiabetes)[highlyCorrelated]
+```
+
+Nothing meets the 75% test so no variables are removed.
+
+## Rank Features By Importance
+
+The importance of features can be estimated from data by building a model. Some methods like decision trees have a built in mechanism to report on variable importance. For other algorithms, the importance can be estimated using a ROC curve analysis conducted for each attribute.
+
+The example below loads the Pima Indians Diabetes dataset and constructs an Learning Vector Quantization (LVQ) model. `varImp` is then used to estimate the variable importance, which is printed and plotted. It shows that  `glucose`, `mass` and `age` are the top 3 most important attributes in the dataset and `insulin` is least important.
+
+```{r}
+# ensure results are repeatable
+set.seed(7)
+# load the library
+library(mlbench)
+library(caret)
+# load the dataset
+data(PimaIndiansDiabetes)
+# prepare training scheme
+control <- trainControl(method="repeatedcv", number=10, repeats=3)
+# train the model
+model <- train(diabetes~., data=PimaIndiansDiabetes, method="lvq", preProcess="scale", trControl=control)
+# estimate variable importance
+importance <- varImp(model, scale=FALSE)
+# summarize importance
+print(importance)
+# plot importance
+plot(importance)
+```
+
+## Feature Selection
+
+Automatic feature selection methods can be used to build many models with different subsets of a dataset and identify those attributes that are and are not required to build an accurate model.
+
+A popular automatic method for feature selection provided by `caret` is called `Recursive Feature Elimination` or RFE.
+
+The example below provides an example of the RFE method on the Pima Indians Diabetes dataset. A Random Forest algorithm is used on each iteration to evaluate the model. The algorithm is configured to explore all possible subsets of the attributes. All 8 attributes are selected in this example, although in the plot showing the accuracy of the different attribute subset sizes, we can see that just 4 attributes gives almost comparable results.
+
+```{r}
+# ensure the results are repeatable
+set.seed(7)
+# load the library
+library(mlbench)
+library(caret)
+# load the data
+data(PimaIndiansDiabetes)
+# define the control using a random forest selection function
+control <- rfeControl(functions=rfFuncs, method="cv", number=10)
+# run the RFE algorithm
+results <- rfe(PimaIndiansDiabetes[,1:8], PimaIndiansDiabetes[,9], sizes=c(1:8), rfeControl=control)
+# summarize the results
+print(results)
+# list the chosen features
+predictors(results)
+# plot the results
+plot(results, type=c("g", "o"))
+```
+
+# spFSR on Pima Indian data
+
+```{r}
+library(mlr)
+mlr_wrapper <- makeLearner("classif.lda", method="t", nu=10)
+Tsk <- makeClassifTask(data = PimaIndiansDiabetes, target = "diabetes")
+perf.measure <- acc
+
+library(spFSR)
+set.seed(123)
+spFSR_select <- spFeatureSelection(
+  task = Tsk,
+  wrapper = mlr_wrapper,
+  measure = perf.measure,
+  num.features.selected = 5
+)
+```
+
+```{r}
+getImportance(spFSR_select)
+```
+
+```{r}
+plotImportance(spFSR_select)
+```
+

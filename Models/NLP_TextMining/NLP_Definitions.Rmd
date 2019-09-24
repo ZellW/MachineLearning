@@ -1,0 +1,185 @@
+---
+title: 'NLP'
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+font-size: 26px;
+color: #4294ce;}
+h2 { /* Header 2 */
+font-size: 22px;}
+h3 { /* Header 3 */
+font-size: 18px;}
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+#table-of-contents h2 {
+  background-color: #4294ce;}
+#table-of-contents{
+  background: #688FAD;}
+#nav-top span.glyphicon{
+  color: #4294ce;}
+#postamble{
+  background: #4294ce;
+  border-top: ;}
+</style>
+
+```{r echo=FALSE, warning=F, message=F}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "kableExtra",  prompt = TRUE)
+options(digits = 3)
+
+setwd("~/GitHub/MachineLearning/Models/NLP_TextMining")
+```
+
+# ToDo
+
+https://shirinsplayground.netlify.com/2019/01/text_classification_keras_data_prep/
+http://text2vec.org/index.html
+https://journocode.com/2016/01/31/project-visualizing-whatsapp-chat-logs-part-1-cleaning-data/
+http://www.rdatamining.com/examples/text-mining
+https://www.kaggle.com/arifelk/sentiment-analysis-with-opennlp-tm
+https://www.tidytextmining.com/sentiment.html
+Standford - coreNLP https://rpubs.com/jlroo/corenlp , https://cran.r-project.org/web/packages/cleanNLP/vignettes/case_study.html 
+https://stanfordnlp.github.io/CoreNLP/other-languages.html 
+
+spacyr
+
+NLP Data
+https://github.com/niderhoff/nlp-datasets
+
+CRAN
+https://cran.r-project.org/web/views/NaturalLanguageProcessing.html
+
+
+# Introduction
+
+The key for a bot to understand the humans is its ability to understand the intentions of humans and extraction of relevant information from that intention and of course relevant action against that information.
+
+NLP (Natural language processing) is the science of extracting the intention of text and relevant information from text. The reason why you see so many bot platforms popping up like mushrooms is the advent of many NLP as a service platforms. Connecting to channels and developing bots was not a problem, the only missing link was a NLP platform which can scale and is easier to work with because you won’t like to learn NLP to make a silly Bot !
+
+An ideal Bot platform offers
+1. A NLP service - that you can train yourself.
+2. SDK to support and handle conversations and their meta-data.
+3. A Platform to host the bot code
+4. A Platform to connect the Bot logic with multiple channels 
+
+Each NLP service has its own corpora of Language and domain that it bootstraps with, the corpora gives ability to models to understand language, grammar and terminologies of a certain domain and you must choose the most suitable domain when you are deploying the NLP service.
+
+
+Intent:  Simply put, intents are the intentions of the end-user, these intentions or intents are conveyed by the user to your bot. You can mainly put your intents in 2 categories
+
+1. Casual Intents
+2. Business Intents
+
+1. Casual Intents: I also call them ‘Small talk’ Intents. These intents are the opener or closer of a conversation. The Greetings like “hi”, “hello”, “Hola”, “Ciao” or “bye” are the opening or closing statements in a conversation. These intents should direct your bot to respond with a small talk reply like “Hello what can I do for you today” or “Bye thanks for talking to me”.
+
+The casual intents also comprise of Affirmative and Negative intents for utterances like “Ok”, “yes please”, “No not this one but the first one”, “Nope”. 
+
+Having General affirmative and negative intents help you handle all such intents and rather take them in context with the conversation bot just had with the client.
+
+For ex - if the Bot just asked a question to end-user - you should expect either an affirmative or a negative intent and if its anything else Bot can ask the same question again. Your affirmative and negative intents should be able to handle most such utterances.
+
+2. Business Intents:  These are the intents that directly map to business of the bot. For eg - if it’s a Movie information Bot then an utterance from client like “When was Schindler’s list released?” is a business intent that intends to find out the Release year of Schindler’s list and you should label it accordingly with an understandable name like “GetReleaseYearByTitle”.
+Ideally you should think more about business intents because rest of small talk like saying hellos or affirming choices is taken care by general casual intents. 
+ 
+Entities
+Business intents have metadata about the intent called “Entities”. Let’s take an example for an Intent “GetReleaseYearByTitle” - Sample Utterance “When was Schindler’s list released ?”
+Here “Schindler’s list” is the title of the movie for which the user “intends” to find out the release year. The process of finding the entities can be understood at Part of speech (POS) tagging. However as a user of NLP as a service you don’t need to get into the technicalities of knowing how POS tagging work but if you do want to here is a nice paper on it http://nlp.stanford.edu/software/tagger.shtml 
+ 
+Whenever user is thinking about designing their intents the entities must also be identified and labelled accordingly. Again, in entities you can have general entities labelled for use throughout the intents like metrics (including quantity, count, volume), Dates and most of NLP as service allows you to tag entities of such general types without any big hassle. 
+ 
+Some entities may be labelled as composite entities that is having more than one entities (component entity) inside it. As a science, it doesn’t matter if you don’t have this feature with your NLP service as long as you have simple entity labelling. One must define component entities before labelling composite entities. 
+For ex:- Find me a pair of Size 8 Red Adidas Sport shoes.
+
+- Intent: SearchProduct
+- Entities:
+  - Composite Entity - ProductDetail
+  - Component Entity
+    - Size 8
+    - Brand - Adidas
+    - color - Red
+    - Category - Sport Shoes
+
+ 
+Training for Intents and Entities
+
+Ideally one should train the NLP as a service with some real corpus, so if you have some chat messages with your clients over Facebook or skype or whatever channel you work with those messages/utterances can help training for intents, otherwise you can think of training for intent with your own “Manufactured” utterances for any intent. For ex - Training for intent of “GetReleaseYearByTitle” can have utterances like
+
+- “what was the release year of movie Pulp fiction”
+- “in which year Pulp fiction was released”
+- “when did pulp fiction came” - Bad English I know :)
+- “When was Pulp fiction released”
+
+The training with Manufactured utterances helps in bootstrapping the system but one must re-train the NLP service when it starts getting some real utterances. The process of re-training the system should keep going on until the error rate reduces. The more variance of utterances you receive from real conversations the better you can train your NLP service for intents. Ideally Minimum 5 or optimally 10 utterances per intent are good enough to bootstrap the system.
+
+The NLP services go through a routine of Supervised - Unsupervised - Supervised learning phases. Each supervised learning phase serves as a feedback loop through which the course correction is done for the NLP models.
+
+User trains the system with utterances - this is supervised learning, then the NLP service learns on its own on the basis of supervised learning and about 10% of what the NLP Service has learnt during unsupervised learning is asked back from the NLP service to the user if what it has learnt has been correct or not, the user again trains or affirms/negates the unsupervised learning results of NLP service and re-trains the model. This process keeps going on and eventually user will find less and less questions by NLP service with more and more confidence towards the questions its asking the user to affirm.
+Key Takeaways -
+
+- Identify Intents in advance:  differentiate between general/casual and business intents.
+- Identify Entities:  differentiate between metric related and noun related entities.
+- If possible train Intents with original corpus of conversations, otherwise train with manufactured utterances. Minimum 5 utterances, optimum 10 utterances.
+- Train, Converse, re-train:  feedback loop must continue in order to train your NLP models.
+
+## Definitions
+
+__NLP__ or Natural Language Processing is a blanket term used to describe a machine’s ability to ingest what is said to it, break it down, comprehend its meaning, determine appropriate action, and respond back in a language the user will understand.
+
+__NLU__, or Natural Language Understanding is a subset of NLP that deals with the much narrower, but equally important facet of how to best handle unstructured inputs and convert them into a structured form that a machine can understand and act upon. While humans are able to effortlessly handle mispronunciations, swapped words, contractions, colloquialisms, and other quirks, machines are less adept at handling unpredictable inputs.
+
+__NLG__, or Natural Language Generation, simply put, is what happens when computers write language. NLG processes turn structured data into text.
+
+In NLU tasks, there is a hierarchy of lenses through which meaning from words can be exrtracted — from words to sentences to paragraphs to documents. At the document level, one of the most useful ways to understand text is by analyzing its topics. The process of learning, recognizing, and extracting these topics across a collection of documents is called topic modeling.
+
+Explore topic modeling through some of the most popular techniques today: LSA, pLSA, LDA, and the newer, deep learning-based lda2vec.
+
+All topic models are based on the same basic assumption:
+
+- each document consists of a mixture of topics
+- each topic consists of a collection of words
+
+Topic models are built around the idea that the semantics of our document are actually being governed by some hidden, or “latent,” variables that we are not observing. As a result, the goal of topic modeling is to uncover these latent variables - topics - that shape the meaning of our document and corpus. T
+
+LSA
+
+Latent Semantic Analysis, or LSA, is one of the foundational techniques in topic modeling. The core idea is to take a matrix of what we have - documents and terms - and decompose it into a separate document-topic matrix and a topic-term matrix.
+
+LSA is quick and efficient to use, but it does have a few primary drawbacks:
+
+- lack of interpretable embeddings (we don’t know what the topics are, and the components may be arbitrarily positive/negative)
+- need for really large set of documents and vocabulary to get accurate results
+- less efficient representation
+
+PLSA
+
+pLSA, or Probabilistic Latent Semantic Analysis, uses a probabilistic method instead of SVD to tackle the problem. The core idea is to find a probabilistic model with latent topics that can generate the data we observe in our document-term matrix. 
+
+pLSA really just adds a probabilistic treatment of topics and words on top of LSA. It is a far more flexible model, but still has a few problems. In particular:
+
+- Because we have no parameters to model P(D), we don’t know how to assign probabilities to new documents
+- The number of parameters for pLSA grows linearly with the number of documents we have, so it is prone to overfitting
+
+pLSA is rarely used on its own. When looking for a topic model beyond LSA, turn to LDA. LDA is the most common type of topic model.
+
+LDA
+
+LDA stands for Latent Dirichlet Allocation. LDA is a Bayesian version of pLSA. In particular, it uses dirichlet priors for the document-topic and word-topic distributions, lending itself to better generalization.  Think of dirichlet as a “distribution over distributions.” In essence, it answers the question: “given this type of distribution, what are some actual probability distributions I am likely to see?”
+
+LDA in Deep Learning: lda2vec
+
+At the document level, it is known how to represent the text as mixtures of topics. At the word level, `word2vec` is used to obtain vector representations. `lda2vec` is an extension of `word2vec` and LDA that jointly learns word, document, and topic vectors.
+

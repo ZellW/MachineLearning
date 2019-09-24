@@ -1,0 +1,541 @@
+---
+title: 'Data Synthesis'
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+#table-of-contents h2 {
+  background-color: #4294ce;}
+#table-of-contents{
+  background: #688FAD;}
+#nav-top span.glyphicon{
+  color: #4294ce;}
+#postamble{
+  background: #4294ce;
+  border-top: ;}
+</style>
+
+```{r echo=FALSE, warning=F, message=F}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+
+packages("plyr", "tidyverse", "titanic", "kableExtra", "funModeling", prompt = TRUE)
+options(digits = 3)
+
+#setwd("~/R/WIP/")
+```
+
+# Introduction
+
+Evaluate R Packages that take data and synthesize it into another different data set with the same data characteristics.
+
+Packages review include:
+
+- simstudy
+- fakeR
+- semiArtificial
+- simCorrMix
+- fabricatr
+- synthpop
+
+## Quick Result
+
+`synthpop` is the best choice of the packages reviewed.  It is simple to use and is customizable.
+
+# Package Reviews
+
+## simstudy
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+packages("simstudy", prompt = FALSE)
+```
+
+https://cran.r-project.org/web/packages/simstudy/vignettes/simstudy.html
+
+Simulates data sets in order to explore modeling techniques or better understand data generating processes. The user specifies a set of relationships between covariates, and generates data based on these specifications. The final data sets can represent data from randomized control trials, repeated measure (longitudinal) designs, and cluster randomized trials. Missingness can be generated using various mechanisms (MCAR, MAR, NMAR).
+
+Simulation using `simstudy` has two primary steps. 
+
+1. User defines the data elements of a data set. 
+2. User generates the data, using the definitions in the first step. 
+
+Additional functionality exists to simulate observed or randomized treatment assignment/exposures, to generate survival data, to create longitudinal/panel data, to create multi-level/hierarchical data, to create data sets with correlated variables based on a specified covariance structure, to merge data sets, to create data sets with missing data, and to create non-linear relationships with underlying spline curves.
+
+The key to simulating data in simstudy is the creation of series of data definition tables.  These definition tables can be generated two ways. One option is to to use any external editor that allows the creation of csv files, which can be read in with a call to `defRead.` An alternative is to make repeated calls to `defData.` 
+
+```{r}
+def <- defData(varname = "nr", dist = "nonrandom", formula = 7, id = "idnum")
+def <- defData(def, varname = "x1", dist = "uniform", formula = "10;20")
+def <- defData(def, varname = "y1", formula = "nr + x1 * 2", variance = 8)
+def <- defData(def, varname = "y2", dist = "poisson", formula = "nr - 0.2 * x1", link = "log")
+def <- defData(def, varname = "xnb", dist = "negBinomial", formula = "nr - 0.2 * x1", variance = 0.05, link = "log")
+def <- defData(def, varname = "xCat", formula = "0.3;0.2;0.5", dist = "categorical")
+def <- defData(def, varname = "g1", dist = "gamma", formula = "5+xCat", variance = 1, link = "log")
+def <- defData(def, varname = "b1", dist = "beta", formula = "1+0.3*xCat", variance = 1, link = "logit")
+def <- defData(def, varname = "a1", dist = "binary", formula = "-3 + xCat", link = "logit")
+def <- defData(def, varname = "a2", dist = "binomial", formula = "-3 + xCat", variance = 100, link = "logit")
+```
+
+The first call to `defData` without specifying a definition name (in this example the definition name is `def`) creates a new data.table with a single row. An additional row is added to the table def each time the function `defData` is called. Each of these calls is the definition of a new field in the data set that will be generated.
+
+The first data field is named `nr`, defined as a constant with a value to be 7. In each call to `defData` the user defines:
+
+- a variable name
+- a distribution (the default is ‘normal’)
+- a mean formula (if applicable)
+- a variance parameter (if applicable)
+- a link function for the mean (defaults to ‘identity’)
+
+After the data set definitions have been created, a new data set with `n` observations can be created with a call to function `genData.` In this example, 1,000 observations are generated using the data set definitions in `def`, and then stored in the object `dt`:
+
+```{r}
+simstudy_data <- genData(1000, def)
+simstudy_data[1:10,] %>% kable() %>% kable_styling(bootstrap_options = c("striped", "condensed", full_width = F))
+```
+
+```{r}
+df_status(simstudy_data,print_results = FALSE) %>% kable() %>% 
+  kable_styling(bootstrap_options = c("striped", "condensed", full_width = F))
+```
+
+Notice `xCat` is not a categorical value - needs to be factored.
+
+### `simnstudy` Initial Conclusions
+
+`simstudy` is a helpful package to create new data sources but not intended to take an initial data set and transform it into another. 
+
+```{r echo=FALSE}
+detach(package:simstudy)
+
+```
+
+## fakeR
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+packages("fakeR", prompt = FALSE)
+rm(list = ls())
+```
+
+https://cran.r-project.org/web/packages/fakeR/fakeR.pdf
+
+Generates fake data from a data set of different variable types. The package contains the functions `simulate_dataset` and `simulate_dataset_ts` to simulate time-independent and time-dependent data. It randomly samples character and factor variables from contingency tables and numeric and ordered factors from a multivariate normal distribution. 
+
+As a response to concerns of anonymity and user privacy when releasing data sets for public use, fakeR is a package created to help allow users to simulate from an existing data set. The package allows for simulating data sets of various variable types. This includes data sets containing categorical and quantitative variables as well as data sets of clustered time series observations. The package functions are also useful for maintaining a similar structure of missingness if one is to exist in the existing data set.
+
+```{r message=FALSE, warning=FALSE}
+library(datasets)
+library(fakeR)
+library(stats)
+
+# single column of an unordered, string factor
+original <- data.frame(division_o = state.division)
+# character variable
+original$division_o <- as.character(original$division_o)
+# numeric variable
+original$area_o <- state.area
+# factor variable
+original$region_o <- state.region
+simulated <- simulate_dataset(original, mvt.method = "eigen") %>% 
+  dplyr::rename(division_s = division_o, area_s = area_o, region_s = region_o)
+# No options for mvt.method="eigen" to prevent negative numbers - big problem.
+```
+
+```{r}
+newTable <- bind_cols(original, simulated)
+newTable %>%  kable() %>% kable_styling(bootstrap_options = c("striped", "condensed", full_width = F)) %>% 
+  add_header_above(c("Original" = 3, "Simulated" = 3)) %>% 
+  column_spec(4:6, background = "#ACBCDC")
+```
+Note the the negative value under `area_s`.
+
+### `fakeR` Initial Conclusions
+
+`fakeR` is a simple solution to simulate data from an existing source.  However, I view in inability to restrict simulated values is a deal-breaker.  The negative value for the simulated area above is a prime example. 
+
+```{r echo=FALSE}
+detach(package:fakeR)
+```
+
+## semiArtificial
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(semiArtificial)
+```
+
+https://cran.r-project.org/web/packages/semiArtificial/semiArtificial.pdf
+
+`semiArtiﬁcial` provides methods to generate and evaluate semi-artiﬁcial data sets. Different data generators take a data set as an input, learn its properties using machine learning algorithms and generates new data with the same properties.
+
+Unique to this package (at least so far) is the ability to generate new data for all variables or create a formula to leave one out and the target class or label.
+
+It appears to generate new data for all variables, the `treeEnsemble` data generator must be used the `rbfDataGen` generator does not appear to support this function. Therefore, the tree ensemble will be explored below.  The process using `treeEnsemble` is the same for `rbfDataGen`.
+
+> A radial basis function network is an artificial neural network that uses radial basis functions as activation functions. The output of the network is a linear combination of radial basis functions of the inputs and neuron parameters. Radial basis function networks have many uses, including function approximation, time series prediction, classification, and system control. 
+
+### Supervised Example
+
+```{r}
+# use iris data set, split into training and testing, inspect the data 
+set.seed(12345) 
+train <- sample(1:nrow(iris),size=nrow(iris)*0.5) 
+irisTrain <- iris[train,] 
+irisTest <- iris[-train,]
+# inspect properties of the original data 
+plot(iris[,-5], col=iris$Species) 
+summary(iris)
+```
+```{r}
+# create tree ensemble generator for classification problem 
+irisGenerator<- treeEnsemble(Species~., irisTrain, noTrees=10)
+# use the generator to create new data 
+irisNew <- newdata(irisGenerator, size=200)
+#inspect properties of the new data 
+plot(irisNew[,-5], col = irisNew$Species) 
+# plot generated data 
+summary(irisNew)
+```
+
+### Unsupervised Example
+
+```{r}
+# create tree ensemble generator for unsupervised problem 
+irisUnsupervised<- treeEnsemble(~.,irisTrain[,], noTrees=10) 
+irisNewUn <- newdata(irisUnsupervised, size=200) 
+plot(irisNewUn) 
+# plot generated data 
+summary(irisNewUn)
+```
+```{r}
+# create tree ensemble generator for regression problem 
+CO2gen<- treeEnsemble(uptake~.,CO2, noTrees=10) 
+CO2New <- newdata(CO2gen, size=200) 
+plot(CO2) 
+# plot original data 
+plot(CO2New) 
+# plot generated data 
+summary(CO2) 
+summary(CO2New)
+```
+
+`dataSimilarity` compares data stored in data1 with data2 on per attribute basis by computing several statistics: mean, standard deviation, skewness, kurtosis, Hellinger distance and KS test.
+
+```{r}
+# inspect properties of the iris data set 
+dataSimilarity(irisNew, irisTrain, dropDiscrete = NA)
+# dropDiscrete is a vector discrete attribute indices to skip in comparison. Typically skip class because its distribution is defined by the data/user.
+```
+
+### `semiArtificial` Initial Conclusions
+
+`semiArtificial` is a simple solution to simulate data from an existing source.  Given the ability to produce supervised and unsupervised puts this package ahead of the packages reviewed so so.
+
+Also, its use of algorithm to produce new data and compare them easily are great features.
+
+```{r echo=FALSE}
+detach(package:semiArtificial)
+```
+
+## SimCorrMix
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, eval=FALSE}
+library(SimCorrMix)
+```
+
+https://cran.r-project.org/web/packages/SimCorrMix/index.html
+
+Because this is used to simulate data sets that mimic real-world clinical or genetic data sets, I submit the complexity it introduces limits the practical opportunity to create new data from existing data simply, this package be skipped for review.
+
+The complexity also follows in a related package.  `SimMultiCorrData` provides for the simulation of Correlated Data with Multiple Variable Types.
+
+## fabricatr
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(fabricatr)
+```
+
+https://cran.r-project.org/web/packages/semiArtificial/semiArtificial.pdf
+
+Helps you imagine your data before you collect it. Hierarchical data structures and correlated data can be easily simulated, either from random number generators or by resampling from existing data sources. 
+
+Here resampling existing data is demonstrated,
+
+```{r}
+resample_data(irisTrain, N = nrow(irisTrain))
+resample_data(irisTrain, N = 5)
+```
+
+### `fabricatr` Initial Conclusions
+
+Resampling works but this does not create new values, simply resamples.  
+
+```{r echo=FALSE}
+detach(package:fabricatr)
+rm(list = ls())
+```
+
+## synthpop
+
+https://cran.r-project.org/web/packages/synthpop/vignettes/synthpop.pdf
+
+This package was previously reviewed so that content is copied below.
+
+`synthpop` is great for synthesizing data for statistical disclosure control or creating training data for model development. Other things to note,
+
+- Synthesizing a single table is fast and simple
+- Watch out for over-fitting particularly with factors with many levels. Ensure the visit sequence is reasonable
+- You are not constrained by only the supported methods, you can build your own
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+suppressPackageStartupMessages(library(synthpop))
+suppressPackageStartupMessages(library(sampling))
+suppressPackageStartupMessages(library(partykit))
+mycols <- c("darkmagenta", "turquoise")
+options(xtable.floating = FALSE)
+options(xtable.timestamp = "")
+myseed <- 20190226
+```
+
+### Sample data
+
+```{r}
+original.df <- SD2011 %>% dplyr::select(sex, age, socprof, income, marital, depress, sport, nofriend, 
+                                        smoke, nociga, alcabuse, bmi)
+head(original.df)
+```
+
+__The objective of synthesizing data is to generate a data set which resembles the original as closely as possible__ meaning  preserving the missing value structure. There are two ways to deal with missing values:
+
+1. impute/treat missing values before synthesis 
+2. synthesize the missing values and deal with the missing later
+
+The second option is generally better since the purpose the data is supporting may influence how the missing values are treated.
+
+Missing values can be simply `NA` or some numeric code specified by the collection. A useful inclusion is the _syn function allows for different NA types_, for example `income`, `nofriend` and `nociga` feature `-8` as a missing value. A list is passed to the function in the following form.
+
+```{r}
+# setting continuous variable NA list
+cont.na.list <- list(income = c(NA, -8), nofriend = c(NA, -8), nociga = c(NA, -8))
+```
+
+By not including this the -8's will be treated as a numeric value and may distort the synthesis. After synthesis, there is often a need to post process the data to ensure it is logically consistent. For example, anyone who is married must be over 18 and anyone who doesn't smoke shouldn't have a value recorded for `number of cigarettes consumed`. These rules can be applied during synthesis rather than needing adhoc post processing.
+
+```{r}
+# apply rules to ensure consistency
+rules.list <- list(marital = "age < 18", nociga = "smoke == 'NO'")
+rules.value.list <- list(marital = "SINGLE", nociga = -8)
+```
+
+The variables in the condition need to be synthesized before applying the rule otherwise the function will throw an error. In this case `age` should be synthesized before `marital` and `smoke` should be synthesized before `nociga.`
+
+There is one person with a bmi of 450.
+
+```{r}
+SD2011[which.max(SD2011$bmi),]
+```
+
+Their weight is missing from the data set and would need to be for this to be accurate.Any `bmi` over 75 will be considered a missing value and corrected before synthesis.
+
+```{r}
+# getting around the error: synthesis needs to occur before the rules are applied
+original.df$bmi <- ifelse(original.df$bmi > 75, NA, original.df$bmi)
+```
+
+The data can now be synthesized using the following code.
+
+```{r}
+# synthesise data
+synth.obj <- syn(original.df, cont.na = cont.na.list, rules = rules.list, rvalues = rules.value.list, seed = myseed)
+synth.obj
+```
+
+The `compare` function allows for easy checking of the synthesized data.
+
+```{r fig.height=10}
+# compare the synthetic and original data frames
+compare(synth.obj, original.df, nrow = 4, ncol = 3, cols = mycols)$plot
+```
+
+The distributions are  well preserved. Did the rules work on the smoking variable?
+
+```{r}
+# checking rules worked
+table(synth.obj$syn[,c("smoke", "nociga")])
+```
+
+They did. All non-smokers have missing values for the number of cigarettes consumed.
+
+`compare` can also be used for model output checking. A logistic regression model will be fit to find the important predictors of depression. The depression variable ranges from 0-21. This will be converted to
+
+- 0-7 - no evidence of depression (0)
+- 8-21 - evidence of depression (1)
+
+This split leaves 3822 (0)'s and 1089 (1)'s for modelling.
+
+```{r warning=FALSE}
+#MODEL COMPARISON
+glm1 <- glm.synds(ifelse(depress > 7, 1, 0) ~ sex + age + log(income) + sport + nofriend + smoke + 
+                    alcabuse + bmi, data = synth.obj, family = "binomial")
+summary(glm1)
+```
+
+```{r warning=FALSE}
+# compare to the original data set
+compare(glm1, original.df, lcol = mycols)
+```
+
+While the model needs more work, the same conclusions would be made from both the original and synthetic data set as can be seen from the confidence intervals. Occasionally there may be contradicting conclusions made about a variable, accepting it in the observed data but not in the synthetic data for example. This scenario could be corrected by using different synthesis methods or altering the visit sequence.
+
+### Preserving Count Data
+
+Population data are often counts of people in geographical areas by demographic variables (age, sex, etc). Some cells in the table can be very small e.g. <5. For privacy reasons these cells are suppressed to protect peoples identity. With a synthetic data, suppression is not required given it contains no real people, assuming there is enough uncertainty in how the records are synthesized.
+
+The existence of small cell counts opens a few questions,
+
+1. If very few records exist in a particular grouping (1-4 records in an area) can they be accurately simulated by synthpop?
+2. Is the structure of the count data preserved?
+
+To test this 200 areas will be simulated to replicate possible real world scenarios. Area size will be randomly allocated ensuring a good mix of large and small population sizes. Population sizes are randomly drawn from a Poisson distribution with mean \lambda. If large, \lambda is drawn from a uniform distribution on the interval [20, 40]. If small, \lambda is set to 1.
+
+```{r}
+# ---------- AREA
+# add area flag to the data frame
+area.label <- paste0("area", 1:200)
+a <- sample(0:1, 200, replace = TRUE, prob = c(0.5, 0.5))
+lambda <- runif(200, 20, 40)*(1-a) + a
+prob.dist <- rpois(200, lambda)
+area <- sample(area.label, 5000, replace = TRUE, prob = prob.dist)
+
+# attach to original data frame
+original.df <- SD2011 %>% dplyr::select(sex, age, socprof, income, marital, depress, sport, nofriend, smoke, nociga, alcabuse, bmi)
+original.df$bmi <- ifelse(original.df$bmi > 75, NA, original.df$bmi)
+original.df <- cbind(original.df, area) %>% arrange(area)
+```
+
+The sequence of synthesizing variables and the choice of predictors is important when there are rare events or low sample areas. If Synthesized very early in the procedure and used as a predictor for following variables, it's likely the subsequent models will over-fit. Synthetic data sets require a level of uncertainty to reduce the risk of statistical disclosure, so this is not ideal.
+
+Fortunately `syn` allows for modification of the predictor matrix. To avoid over-fitting, `area` is the last variable to by synthesized and will only use `sex` and `age` as predictors. This is reasonable to capture the key population characteristics. Additionally, `syn` throws an error unless `maxfaclevels` is changed to the number of areas (the default is 60). This is to prevent poorly synthesized data for this reason and a warning message suggest to check the results, which is good practice.
+
+```{r message=FALSE}
+# synthesise data
+# m is set to 0 as a hack to set the synds object and the predictor matrix
+synth.obj.b <- syn(
+  original.df, cont.na = cont.na.list, rules = rules.list, rvalues = rules.value.list, 
+  maxfaclevels = 200, seed = myseed, m = 0)
+```
+
+Changing the predictor matrix to predict area with only age and sex
+
+```{r}
+new.pred.mat <- synth.obj.b$predictor.matrix
+new.pred.mat["area",] <- 0
+new.pred.mat["area",c("age", "sex")] <- 1
+new.pred.mat
+```
+
+### Synthesizing New Predictor
+```{r}
+synth.obj.b <- syn(original.df, cont.na = cont.na.list, 
+                   rules = rules.list, rvalues = rules.value.list, 
+                   maxfaclevels = 200, seed = myseed,
+                   proper = TRUE, predictor.matrix = new.pred.mat)
+```
+
+### Compare Synthetic and Original Data
+```{r}
+compare(synth.obj.b, original.df, vars = "area", nrow = 1, ncol = 1, cols = c("darkmagenta", "turquoise"), stat = "counts")$plot
+```
+
+The area variable is simulated fairly well on simply age and sex. It captures the large and small areas, however the large areas are relatively more variable. This could use some fine tuning, but will stick with this for now.
+
+```{r}
+tab.syn <- synth.obj.b$syn %>% dplyr::select(area, sex) %>% table()
+tab.syn[1:20,]
+```
+
+
+```{r}
+tab.orig <- original.df %>% dplyr::select(area, sex) %>% table()
+tab.orig[1:20,]
+```
+
+```{r message=FALSE}
+d <- data.frame(difference = as.numeric(tab.syn - tab.orig), sex = c(rep("Male", 154), rep("Female", 154)))
+
+ggplot(d, aes(x = difference, fill = sex)) + geom_histogram() + facet_grid(sex ~ .) + 
+  scale_fill_manual(values = mycols)
+```
+
+The method does a good job at preserving the structure for the areas. How much variability is acceptable is up to the user and intended purpose. Using more predictors may provide a better fit. The errors are distributed around zero, a good sign no bias has leaked into the data from the synthesis.
+
+```{r}
+tab.syn <- synth.obj.b$syn %>% dplyr::select(area, sex) %>% table()
+
+tab.orig <- original.df %>% dplyr::select(area, sex) %>% table()
+```
+
+The method does a good job at preserving the structure for the areas. How much variability is acceptable is up to the user and intended purpose. Using more predictors may provide a better fit. The errors are distributed around zero, a good sign no bias has leaked into the data from the synthesis.
+
+```{r}
+tab.syn <- synth.obj.b$syn %>% dplyr::select(marital, sex) %>% table()
+tab.syn
+tab.orig <- original.df %>% dplyr::select(marital, sex) %>% table()
+tab.orig
+```
+
+At higher levels of aggregation the structure of tables is more maintained.
+
+### Simple Example
+
+```{r}
+my_synth.obj <- syn(iris)
+
+compare(my_synth.obj, iris, nrow = 4, ncol = 3, cols = mycols)$plot
+```
+
+
+### `synthpop` Initial Conclusions
+
+`synthpop` is a comprehensive solution that can be simple to use or configured with options to fine-tune the output data.  Fine-tuning may take a bit of time.
+
+The ability to use it quickly and compare output to original data makes this an attractive option.
+
+```{r echo=FALSE}
+detach(package:synthpop)
+```
+
+# Conclusions & Recommendations
+
+Two packages provide a fast way to simulate data from an existing source data frame"
+
+- `semiArtifical`
+- `synthpop`
+
+Either of these packages will meet foreseeable needs.  However, because `semiArtificial` requires an extra step defining the generator, it is not quite as easy to master.  Therefore, `synthpop` is recommended.  One line of code the develop new data and one line to compare the new data with original data.  Simple to use.
+
+`synthpop` also provide additional features to fine-tune the original data if needed.
+
+
+
+
+
+

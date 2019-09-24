@@ -1,0 +1,287 @@
+---
+title: 'Great Caret Example'
+output:
+  html_document:
+    highlight: pygments
+    theme: spacelab
+    toc: yes
+    toc_float: true
+    toc_collapsed: true
+    toc_depth: 3
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+setwd("~/R/Complete") #change as needed
+
+# options
+options(echo=TRUE)
+options(stringsAsFactors=FALSE)
+
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("caret", "rsample",  "tidyverse", "recipes", "ISLR", prompt = TRUE)
+```
+
+> This document is a replica of the orignal found here:
+https://poissonisfish.wordpress.com/2018/11/16/the-all-new-caret-interface-in-r/
+
+# Quick Introduction
+
+The DREAM Olfaction Prediction Challenge training set consists of 338 compounds characterised by 4,884 physicochemical features (the design matrix), and profiled by 49 subjects with respect to 19 semantic descriptors, such as 'flower', 'sweet' and 'garlic', together with intensity and pleasantness (all perceptual attributes). Two different dilutions were used per compound. The perceptual attributes were given scores in the 0-100 range. The two major goals of the competition were to use the physicochemical features in modelling i) the perceptual attributes at the subject-level and ii) both the mean and standard deviation of the perceptual attributes at the population-level. In the end, the organisers garnered important insights about the biochemical basis of flavour, from teams all over the world. The resulting models were additionally used to reverse-engineer nonexistent compounds from target sensory profiles - an economically exciting prospect.
+
+Since pleasantness is one of the most general olfactory properties, model the population-level median pleasantness of all compounds, from all physicochemical features. The median, as opposed to the mean, is less sensitive to outliers and an interesting departure from the original approach we can later compare against.
+
+# Get Data
+
+Pull data directly from [DREAM Olfaction Prediction GitHub repository](https://github.com/dream-olfaction/olfaction-prediction/tree/master/data). Use `readr` to parse as tab-separated values (TSV). Re-write `Compound Identifier` in the sensory profiles into CID to match with that from the design matrix `molFeats`.
+
+```{r getData}
+setwd("~/R/Complete")
+# Create directory and download files
+# ghurl <- "https://github.com/dream-olfaction/olfaction-prediction/raw/master/data/"
+# download.file(paste0(ghurl, "TrainSet.txt"), destfile = "../data/trainSet.txt")
+# download.file(paste0(ghurl, "molecular_descriptors_data.txt"), destfile = "../data/molFeats.txt")
+
+# Read files with readr, select least diluted compounds            
+responses <- read_tsv("../data/trainSet.txt") %>% rename(CID = `Compound Identifier`)
+
+molFeats <- read_tsv("../data/molFeats.txt") # molecular features
+
+# Determine intersection of compounds in features and responses
+commonMols <- intersect(responses$CID, molFeats$CID)
+# Subset features and responses accordingly
+responses <- responses %>%  filter(CID %in% commonMols)
+
+library(magrittr)
+molFeats %<>% filter(CID %in% commonMols)#shortcut I should learn to use
+detach("package:magrittr", unload = TRUE)
+```
+
+Filter compounds that are common to both datasets and reorder them. The profiled perceptual attributes span a total of 49 subjects, two different dilutions and some replications. Determine the median `pleasantness` ($VALENCE/PLEASANTNESS$) per compound across all subjects and dilutions while ignoring missingness with `na.rm = T`. Ensure the order of the compounds is identical between this new dataset and the design matrix to introduce population-level `pleasantness` as a new column termed `Y` in the new design matrix `X`. 
+
+```{r}
+# Compute median pleasantness across the population
+medianPlsnt <- responses %>% group_by(CID) %>% 
+ summarise(pleasantness = median(`VALENCE/PLEASANTNESS`, na.rm = T))
+
+all(medianPlsnt$CID == molFeats$CID) # TRUE - rownames match
+
+# Concatenate predictors (molFeats) and population pleasantness
+X <-  molFeats %>% mutate(Y = medianPlsnt$pleasantness) %>% select(-CID)
+```
+
+> nearZeroVar
+
+`nearZeroVar` diagnoses predictors that have one unique value (i.e. are zero variance predictors) or predictors that are have both of the following characteristics: 
+
+- they have very few unique values relative to the number of samples
+  - `freqCut` is the cutoff for the ratio of the most common value to the second most common 
+- the ratio of the frequency of the most common value to the frequency of the second most common value is large
+
+An example of near zero variance predictor is a DF that has 1000 samples and two distinct values and 999 of them are a single value.
+
+To be flagged, first the frequency of the most prevalent value over the second most frequent value (called the "frequency ratio") must be above `freqCut`. Secondly, the "percent of unique values," the number of unique values divided by the total number of samples (times 100), must also be below uniqueCut.
+
+In the above example, the frequency ratio is 999 ($999/1$) and the unique value percentage is 0.0001 ($1/1000$).
+
+There are many skewed binary variables. Binary predictor that are all zeros or all ones throughout will harm the model training process. There is still the risk of having near-zero-variance predictors, which can be controlled based on various criteria (e.g. number of samples, size of splits). This can also impact quantitative, continuous variables. Use `nearZeroVar` from `caret` to identify faulty predictors that are either zero-variance or display values whose frequency exceeds a predefined threshold. Having a 5x repeated 5-fold cross-validation in mind.
+
+If `freqcut = 4` then $Most Prevalent/2nd Most Prevalent > 4$.  Examine a variable to drive this home.
+
+```{r}
+table(X$LLS_02)
+```
+```{r}
+table(X$LLS_02)[3]/table(X$LLS_02)[2]
+```
+
+Because the frequency ratio, `r table(X$LLS_02)[3]/table(X$LLS_02)[2]` `> 4`, this variable would be removed from the data.  The simple way to envsion this is if you had 100 records and there are 2 values.  One value is `A` with 80 records and `B` with 20 records.  The frequency ration = $80/20 = 4$.
+
+Below, 4,870 features are rduced to 2,554 - a massive reduction by almost a half.
+
+```{r}
+# Filter nzv
+X <- X[, -nearZeroVar(X, freqCut = 4)] # == 80/20
+```
+
+> Statified Sampling
+
+Stratified random sampling is a method of sampling that involves the division of a population into smaller groups known as strata. In stratified random sampling or stratification, the strata are formed based on members' shared attributes or characteristics. Stratified random sampling is also called proportional random sampling or quota random sampling.
+
+Stratified random sampling is a better method than simple random sampling. Stratified random sampling divides a population into subgroups or strata, and random samples are taken, in proportion to the population, from each of the strata created. The members in each of the stratum formed have similar attributes and characteristics. This method of sampling is widely used and very useful when the target population is heterogeneous. A simple random sample should be taken from each stratum. 
+
+[See examples here](https://www.investopedia.com/ask/answers/032615/what-are-some-examples-stratified-random-sampling.asp)
+
+Use `rsample` to define the train-test and cross-validation splits. 10% of the data allocated to the test set; by additionally requesting stratification based on the target Y, it is ensures to have a representative subset.The following steps consist of setting up a 5x repeated 5-fold cross-validation for the training set. Use `vfold_cv` and convert the output to a `caret`-like object via `rsample2caret`. 
+
+```{r sampling}
+# Split train/test with rsample
+set.seed(100)
+initSplit <- initial_split(X, prop = .9, strata = "Y")
+# strata is variable that is used to conduct stratified sampling to create the resamples.
+trainSet <- training(initSplit)
+testSet <- testing(initSplit)
+```
+
+> oneSE
+
+oneSE is a rule in the spirit of the "one standard error" rule of Breiman et al. (1984), who suggest that the tuning parameter associated with the best performance may over fit. They suggest that the simplest model within one standard error of the empirically optimal model is the better choice. This assumes that the models can be easily ordered from simplest to most complex.
+
+Below, initialize a `trainControl` object and overwrite `index` and `indexOut` using the corresponding elements in the newly converted` vfold_cv` output.
+
+```{r}
+# Create 5-fold cross-validation, convert to caret class
+set.seed(100)
+myFolds <- vfold_cv(trainSet, v = 5, repeats = 5, strata = "Y") %>% rsample2caret()
+ctrl <- trainControl(method = "cv", selectionFunction = "oneSE")
+ctrl$index <- myFolds$index
+ctrl$indexOut <- myFolds$indexOut
+```
+
+Prior to modelling, create two reference variables:
+
+- `binVars` to identify binary variables
+- `missingVars` to identify any variables containing missing values
+
+These will help with excluding binary variables from mean-centering and unit-variance scaling.  The new variables are also used to restrict mean-based imputation to variables that do contain missing values.  **THIS IS USEFUL!**
+
+```{r newVars}
+# binary vars
+binVars <- which(sapply(X, function(x){all(x %in% 0:1)}))
+missingVars <- which(apply(X, 2, function(k){any(is.na(k))}))
+```
+
+Develop a repeated daya pieline using `recipes`:
+
+- Yeo-Johnson [2] transformation of all quantitative predictors
+- Mean-center all quantitative predictors
+- Unit-variance scale all quantitative predictors
+- Impute missing values with the mean of the incident variables
+
+```{r recipe}
+# Design recipe
+myRec <- recipe(Y ~ ., data = trainSet) %>% 
+      step_YeoJohnson(all_predictors(), -binVars) %>% 
+      step_center(all_predictors(), -binVars) %>% 
+      step_scale(all_predictors(), -binVars) %>% 
+      step_meanimpute(missingVars)
+```
+
+`Yeo-Johnson` procedure transforms variables to be distributed as Gaussian-like as possible. 
+
+Before delving into the models, tweak the recipe and assign it to `pcaRep`, conduct a principal component analysis and examine how different compounds distribute along the first two principal components. Color them based on their population-level pleasantness - red for very pleasant, blue for very unpleasant and the gradient in between, via `colGrad`.
+
+> juice
+
+As steps are estimated by prep, these operations are applied to the training set. Rather than running bake to duplicate this processing, this function will return variables from the processed training set.
+
+Note that `pcaRep` itself is just a recipe on wait. Except for recipes passed to `caret::train`, to process and extract the data as instructed you need to either `bake` or `juice` the recipe. The difference between the two is that `juicing` outputs the data associated to the recipe (e.g. the training set), whereas `baking` can be applied to process any other dataset. `Baking` is done with `bake`, provided the recipe was trained using `prep`.
+
+```{r}
+# simple PCA, plot
+pcaRec <- myRec %>% step_pca(all_predictors())
+
+myPCA <- prep(pcaRec, training = trainSet, retain = T) %>% juice()
+colGrad <- trainSet$Y/100 # add color
+
+plot(myPCA$PC1, myPCA$PC2, col = rgb(1 - colGrad, 0, colGrad,.5), pch = 16, xlab = "PC1", ylab = "PC2")
+
+legend("topleft", pch = 16, col = rgb(c(0,.5,1), 0, c(1,.5,0), alpha = .5), 
+       legend = c("Pleasant", "Neutral", "Unpleasant"), bty = "n")
+```
+
+The compounds do not seem to cluster into groups, nor do they clearly separate with respect to pleasantness.
+ 
+Training five regression models aiming at minimising the root mean squared error (RMSE):
+
+1. k-nearest neighbours (KNN)
+2. elastic net (ENET)
+3. support vector machine with a radial basis function kernel (SVM)
+4. random forests (RF)
+5. extreme gradient boosting (XGB) and Quinlan's Cubist (CUB) - 
+
+`tuneGrid` and `tuneLength` are used interchangeably. 
+
+Might need to use `doParallel` package.  The runtime may required a few hours to run.
+
+```{r}
+# Train
+doMC::registerDoMC(10)
+knnMod <- train(myRec, data = trainSet,
+           method = "knn",
+           tuneGrid = data.frame(k = seq(5, 25, by = 4)),
+           trControl = ctrl)
+
+enetMod <- train(myRec, data = trainSet,
+                 method = "glmnet",
+                 tuneGrid = expand.grid(alpha = seq(0, 1, length.out = 5),
+                                        lambda = seq(.5, 2, length.out = 5)),
+                 trControl = ctrl)
+
+svmMod <- train(myRec, data = trainSet,
+                method = "svmRadial",
+                tuneLength = 8,
+                trControl = ctrl)
+
+rfMod <- train(myRec, data = trainSet,
+               method = "ranger",
+               tuneLength = 8,
+               num.trees = 5000,
+               trControl = ctrl)
+
+xgbMod <- train(myRec, data = trainSet,
+                method = "xgbTree",
+                tuneLength = 8,
+                trControl = ctrl)
+
+cubMod <- train(myRec, data = trainSet,
+                method = "cubist",
+                tuneLength = 8,
+                trControl = ctrl)
+
+modelList <- list("KNN" = knnMod,
+                  "ENET" = enetMod,
+                  "SVM" = svmMod,
+                  "RF" = rfMod,
+                  "XGB" = xgbMod,
+                  "CUB" = cubMod)
+```
+
+Once the training is over, compare the optimal five cross-validated models based on their RMSE across all resamples, using some `bwplot` magic sponsored by `lattice`. 
+
+```{r}
+bwplot(resamples(modelList), metric = "RMSE")
+```
+
+The cross-validated RSME does not vary considerably across the six optimal models. To conclude, I propose creating a model ensemble by simply taking the average predictions of all six optimal models on the test set, to compare observed and predicted population-level pleasantness in this hold-out subset of compounds.
+
+```{r}
+# Validate on test set with ensemble
+allPreds <- sapply(modelList, predict, newdata = testSet)
+ensemblePred <- rowSums(allPreds) / length(modelList)
+
+# Plot predicted vs. observed; create PNG
+plot(ensemblePred, testSet$Y,
+     xlim = c(0,100), ylim = c(0,100),
+     xlab = "Predicted", ylab = "Observed",
+     pch = 16, col = rgb(0, 0, 0, .25))
+abline(a=0, b=1)
+
+writeLines(capture.output(sessionInfo()), "sessionInfo")
+```
+
+The ensemble fit on the test set is not terrible - slightly underfit, predicting the poorest in the two extremes of the pleasantness range. All in all, it attained a prediction correlation of , which is slightly larger than the mean reported. Note that there are only 31 compounds in the test set. 
+
+The revamped caret framework offers:
+
+- A substantially expanded, unified syntax for models and utils. Keep an eye on `textrecipes`, an upcoming complementary package for processing textual data.
+- A sequential streamlining of extraction, processing and modelling, enabling recycling of previous computations;
+- Executing-after-splitting, thereby precluding leaky validation strategies.
+
+```{r}
+save.image("GreatCaretExample.RData")
+```
+
+
+
+

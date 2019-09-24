@@ -1,0 +1,93 @@
+---
+title: "Compare AutoML Options"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: hide
+---
+
+```{r echo=FALSE, warning=TRUE, message=TRUE}
+setwd("~/R/WIP") #change as needed
+
+# options
+options(echo=TRUE)
+options(stringsAsFactors=FALSE)
+
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("dplyr", "SuperLearner",  "MachineShop", "recipes", "MASS", prompt = TRUE)
+```
+
+# Data
+
+```{r}
+glimpse(Boston)
+```
+
+- crim - per capita crime rate by town. 
+- zn - proportion of residential land zoned for lots over 25,000 sq.ft. 
+- indus - proportion of non-retail business acres per town. 
+- chas - Charles River dummy variable (= 1 if tract bounds river; 0 otherwise). 
+- nox - nitrogen oxides concentration (parts per 10 million). 
+- rm - average number of rooms per dwelling. 
+- age - proportion of owner-occupied units built prior to 1940. 
+- dis - weighted mean of distances to five Boston employment centres. 
+- rad - index of accessibility to radial highways. 
+- tax - full-value property-tax rate per \$10,000. 
+- ptratio - pupil-teacher ratio by town. 
+- black - 1000(Bk - 0.63)^2 where Bk is the proportion of blacks by town. 
+- lstat - lower status of the population (percent). 
+- medv - median value of owner-occupied homes in \$1000s. 
+
+> Solve for medv
+
+# R Packages
+
+## SuperLearner
+
+```{r}
+set.seed(1)
+
+sl_lib = c("SL.xgboost", "SL.randomForest", "SL.glmnet", "SL.nnet", "SL.ksvm",
+           "SL.bartMachine", "SL.kernelKnn", "SL.rpartPrune", "SL.lm", "SL.mean")
+
+# Fit XGBoost, RF, Lasso, Neural Net, SVM, BART, K-nearest neighbors, Decision Tree, 
+# OLS, and simple mean; create automatic ensemble.
+result_SuperLearner = SuperLearner(Y = Boston$medv, X = Boston[, -14], SL.library = sl_lib)
+
+# Review performance of each algorithm and ensemble weights.
+result_SuperLearner
+```
+```{r}
+# Use external (aka nested) cross-validation to estimate ensemble accuracy. This will take a while to run.
+result_SuperLearner2 = CV.SuperLearner(Y = Boston$medv, X = Boston[, -14], SL.library = sl_lib)
+
+# Plot performance of individual algorithms and compare to the ensemble.
+plot(result_SuperLearner2) + theme_minimal()
+```
+```{r}
+# Hyperparameter optimization --
+# Fit elastic net with 5 different alphas: 0, 0.2, 0.4, 0.6, 0.8, 1.0.
+# 0 corresponds to ridge and 1 to lasso.
+enet = create.Learner("SL.glmnet", detailed_names = T, tune = list(alpha = seq(0, 1, length.out = 5)))
+
+sl_lib2 = c("SL.mean", "SL.lm", enet$names)
+
+enet_sl = SuperLearner(Y = Boston$medv, X = Boston[, -14], SL.library = sl_lib2)
+
+# Identify the best-performing alpha value or use the automatic ensemble.
+enet_sl
+```
+
+## MachineShop
+
+MachineShop is a meta-package for statistical and machine learning with a common interface for model fitting, prediction, performance assessment, and presentation of results.
+
+https://cran.r-project.org/web/packages/MachineShop/vignettes/Introduction.html 
+
+```{r}
+gbmfit <- fit(medv ~ ., data = Boston, model = GBMModel)
+varimp(gbmfit)
+
+```
+

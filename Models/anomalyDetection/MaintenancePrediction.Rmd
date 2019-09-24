@@ -1,0 +1,338 @@
+---
+title: "Maintenance Prediction"
+output:
+  html_document:
+    theme: united
+    highlight: tango
+    code_folding: hide
+    toc: true
+    toc_depth: 3
+    toc_float:
+      collapsed: true
+      smooth_scroll: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "tidyquant", "h2o", "funModeling", prompt = F)
+set.seed(123)
+```
+
+# Introduction
+
+Goal is to identify anomalous products on the production line by using measurements from testing stations and deep learning models. Anomalous products are not failures, these anomalies are products close to the measurement limits, so we can display warnings before the process starts to make failed products and in this way the stations get maintenance.
+
+# Data
+
+Use [SECOM Data Set from UCI Machine Learning Repository](https://archive.ics.uci.edu/ml/datasets/SECOM).     
+A complex modern semi-conductor manufacturing process is normally under consistent surveillance via the monitoring of signals/variables collected from sensors and or process measurement points. However, not all of these signals are equally valuable in a specific monitoring system. The measured signals contain a combination of useful information, irrelevant information as well as noise. It is often the case that useful information is buried in the latter two. Engineers typically have a much larger number of signals than are actually required. If we consider each type of signal as a feature, then feature selection may be applied to identify the most relevant signals. The Process Engineers may then use these signals to determine key factors contributing to yield excursions downstream in the process. This will enable an increase in process throughput, decreased time to learning and reduce the per unit production costs. 
+
+To enhance current business improvement techniques the application of feature selection as an intelligent systems technique is being investigated. 
+
+The dataset presented in this case represents a selection of such features where each example represents a single production entity with associated measured features and the labels represent a simple pass/fail yield for in house line testing, figure 2, and associated date time stamp. Where –1 corresponds to a pass and 1 corresponds to a fail and the data time stamp is for that specific test point. 
+
+Using feature selection techniques it is desired to rank features according to their impact on the overall yield for the product, causal relationships may also be considered with a view to identifying the key features. 
+
+Results may be submitted in terms of feature relevance for predictability using error rates as our evaluation metrics. It is suggested that cross validation be applied to generate these results. Some baseline results are shown below for basic feature selection techniques using a simple kernel ridge classifier and 10 fold cross validation. 
+
+Baseline Results: Pre-processing objects were applied to the dataset simply to standardize the data and remove the constant features and then a number of different feature selection objects selecting 40 highest ranked features were applied with a simple classifier to achieve some initial results. 10 fold cross validation was used and the balanced error rate (*BER) generated as our initial performance metric to help investigate this dataset. 
+
+SECOM Dataset: 1567 examples 591 features, 104 fails 
+
+1. __FSmethod__ (40 features) BER % True + % True - % 
+2. __S2N__ (signal to noise) 34.5 +-2.6 57.8 +-5.3 73.1 +2.1 
+3. __Ttest__ 33.7 +-2.1 59.6 +-4.7 73.0 +-1.8 
+4. __Relief__ 40.1 +-2.8 48.3 +-5.9 71.6 +-3.2 
+5. __Pearson__ 34.1 +-2.0 57.4 +-4.3 74.4 +-4.9 
+6. __Ftest__ 33.5 +-2.2 59.1 +-4.8 73.8 +-1.8 
+7. __Gram Schmidt__ 35.6 +-2.4 51.2 +-11.8 77.5 +-2.3
+
+Training data set - 100k test passed records, approximately a month of production data.
+Testing data set - last 24 hours of testing station data
+
+```{r}
+allData = read.csv("../data/secom.data", sep = " ", header = FALSE, encoding = "UTF-8" )
+```
+```{r}
+ df_status(allData, print_results = F) %>% select(variable, q_na, p_na) %>% arrange(-q_na)
+```
+
+`q_na` indicates the quantity of NA values and `p_na` is the percentage. 
+
+```{r manageMissing, eval=FALSE}
+if( dim(na.omit(allData))[1] == 0 ){
+  for( colNum in 1:dim( allData )[2]   ){
+    # Get valid values from the actual column values
+    ValidColumnValues = allData[,colNum][!is.nan( allData[, colNum] )]
+    
+    # Check each value in the actual active column.
+    for( rowNum in 1:dim( allData )[1]   ){
+      if( is.nan( allData[rowNum, colNum] ) ) {
+        # Assign random valid value to actual row,column with NA value
+        allData[rowNum, colNum] = 
+          ValidColumnValues[floor(runif(1, min = 1, max = length( ValidColumnValues)))]
+        }
+      }
+    }
+}
+```
+```{r}
+df_status(allData, print_results = F) %>% select(variable, q_na, p_na) %>% arrange(-q_na)
+```
+
+No more missing values.
+
+```{r dataSplit}
+trainingData = allData[1:floor(dim(allData)[1]*.9), ]
+testingData = allData[(floor(dim(allData)[1]*.9)+1):dim(allData)[1], ]
+```
+
+# Create Models
+
+## Isolation Forest
+
+```{r h20}
+Sys.unsetenv("http_proxy")
+Sys.unsetenv("https_proxy")
+
+suppressWarnings(suppressMessages(library(h2o))) 
+
+h2o.init(nthreads = -1, max_mem_size = "5G")
+h2o.no_progress() # Disable progress bars for Rmd
+h2o.removeAll() # Cleans h2o cluster state.
+
+# Convert the training dataset to H2O format.
+trainingData_hex = as.h2o(trainingData, destination_frame = "train_hex" )
+```
+
+```{r}
+# Build an Isolation forest model
+# According to H2O doc: 
+# http://docs.h2o.ai/h2o/latest-stable/h2o-docs/data-science/if.html
+trainingModel_Isolation = h2o.isolationForest(training_frame = trainingData_hex,
+                                    sample_rate = 0.1, max_depth = 32, ntrees = 100)
+```
+
+```{r}
+# Calculate score for training dataset
+score <- h2o.predict( trainingModel_Isolation, trainingData_hex)
+result_pred <- as.vector(score$predict)
+```
+
+```{r}
+# Setting threshold value for anomaly detection.
+# Setting desired yield threshold percentage.
+yieldThreshold = .99 # Let's say we want a 99% yield
+
+# Using yield threshold to get score limit to filter anomalous units.
+scoreLimit = round(quantile(result_pred, yieldThreshold), 3)
+```
+
+Get anomalies from testing data, using model and scoreLimit got using training data.
+
+```{r}
+# Convert testing data frame to H2O format.
+testingDataH2O = as.h2o( testingData, destination_frame = "testingData_hex" )
+  
+# Get score using training model
+testingScore <- h2o.predict( trainingModel_Isolation, testingDataH2O )
+
+# Add row score at the beginning of testing dataset
+testingData = cbind( RowScore = round(as.vector(testingScore$predict), 3), testingData)
+
+# Get anomalies from testing data
+anomalies = testingData[ testingData$RowScore > scoreLimit, ]
+
+  if( dim(anomalies)[1]  > 0 ){
+    
+    cat( "Email to Engineering: Anomalies detected in the sample data, station needs maintenance." )
+    
+    # Plotting anomalies found.  
+    plot( x = row.names(anomalies)
+          , y = anomalies$RowScore
+          , xlab = "Main Dataset Row Number."
+          , ylab = "Anomaly Score"
+          , main = paste0( "Anomalies, Yield Threshold: ", yieldThreshold, ", Score Limit: ", scoreLimit )
+          , pch = 2
+          , cex.main = 1
+          , frame.plot = FALSE
+          , col = "blue", panel.first=grid() )
+  }
+```
+
+> Isolation Forest :  Fast way to get anomalies; easy to implement.
+
+```{r echo=FALSE}
+rm(list = ls())
+load("h20_Predict_Maintenace.RData")
+```
+
+## Autoencoder
+
+```{r echo=FALSE}
+Sys.unsetenv("http_proxy")
+Sys.unsetenv("https_proxy")
+
+h2o.init(nthreads = -1, max_mem_size = "5G")
+h2o.no_progress() # Disable progress bars for Rmd
+h2o.removeAll() # Cleans h2o cluster state.
+
+# Convert the training dataset to H2O format.
+trainingData_hex = as.h2o(trainingData, destination_frame = "train_hex" )
+```
+
+```{r eval=FALSE}
+# Set the input variables
+featureNames = colnames(trainingData_hex)
+
+# Creating the first model version.
+trainingModel = h2o.deeplearning(x = featureNames, training_frame = trainingData_hex,
+                                  model_id = "Station1DeepLearningModel",
+                                  activation = "Tanh",
+                                  autoencoder = TRUE,
+                                  reproducible = TRUE,
+                                  l1 = 1e-5,
+                                  ignore_const_cols = FALSE,
+                                  seed = 1234,
+                                  hidden = c(400, 200, 400), epochs = 50)
+
+h2o_Predict_Maintenace <- h2o.saveModel(trainingModel, path = "data/", force = TRUE)
+
+trainingModel <- h20.loadModel(h2o_Predict_Maintenace)
+# Getting the anomaly with training data to set the min MSE
+# value before setting a record as anomally
+trainMSE = as.data.frame(h2o.anomaly(trainingModel, trainingData_hex, per_feature = FALSE))
+# Review first 30 descendent sorted trainMSE records to see outliers
+head(sort(trainMSE$Reconstruction.MSE , decreasing = TRUE), 30)
+
+save.image(file="h20_Predict_Maintenace.RData")
+```
+
+```{r echo=FALSE}
+head(sort(trainMSE$Reconstruction.MSE , decreasing = TRUE), 30)
+```
+
+```{r}
+plot(sort(trainMSE$Reconstruction.MSE), main = 'Reconstruction Error', ylab = "MSE Value." )
+
+plotly::plot_ly(x = rownames(trainMSE), y = sort(trainMSE$Reconstruction.MSE), type = "bar")
+# ggplot(trainMSE, aes(x = rownames(trainMSE), y = Reconstruction.MSE, group=1)) + geom_line()
+
+ggplot(trainMSE, aes(x = Reconstruction.MSE)) + geom_histogram(binwidth = .002, fill="green") +
+  geom_vline(aes(xintercept = mean(Reconstruction.MSE)), color = "blue", linetype = "dashed", size = 1)
+
+```
+
+Evaluating the chart and the first 30 decresing sorted MSE records, we can decide .01 as our min MSE before setting a record as anomally because we see Just a few records with two decimals greater than zero and we can set those as outliers.
+
+```{r eval=FALSE}
+# Updating trainingData data set with reconstruction error < .01
+trainingDataNew = trainingData[trainMSE$Reconstruction.MSE < .01, ]
+
+h2o.removeAll() ## Remove the data from the h2o cluster in preparation for our final model.
+
+# Convert our new training data frame to H2O format.
+trainingDataNew_hex = as.h2o(trainingDataNew, destination_frame = "train_hex")
+
+# Creating  final model.
+trainingModelNew = h2o.deeplearning(x = featureNames, training_frame = trainingDataNew_hex,
+                                    model_id = "Station1DeepLearningModel",
+                                    activation = "Tanh",
+                                    autoencoder = TRUE,
+                                    reproducible = TRUE, l1 = 1e-5,
+                                    ignore_const_cols = FALSE,
+                                    seed = 1234,
+                                    hidden = c(400, 200, 400), epochs = 50)
+save.image(file="h20_Predict_Maintenace.RData")
+```
+
+Get anomalies from testing data, using model and threshold set using training data.
+```{r eval=FALSE}
+#Convert our testing data frame to H2O format.
+testingDataH2O = as.h2o(testingData, destination_frame = "test_hex")
+
+# Getting anomalies found in testing data.
+testMSE = as.data.frame(h2o.anomaly(trainingModelNew, testingDataH2O, per_feature = FALSE))
+# per_feature	- Whether to return the per-feature squared reconstruction error
+
+# Binding our data.
+testingData = cbind(MSE = testMSE$Reconstruction.MSE , testingData)
+
+# Filter testing data using the MSE value set as minimum.
+anomalies = testingData[testingData$MSE >= .01, ]
+
+# When anomalies detected, send a notice to maintenance area.
+if(dim(anomalies)[1] > 0){
+  cat( "Anomalies detected in the sample data, station needs maintenance." )}
+```
+
+```{r}
+yieldThreshold = .99 # Let's say we want a 99% yield
+    # Plotting anomalies found.  
+    plot(x = row.names(anomalies), y = anomalies$RowScore, 
+          xlab = "Main Dataset Row Number.", ylab = "Anomaly Score", 
+          main = paste0("Anomalies, Yield Threshold: ", yieldThreshold, ", Score Limit: ", scoreLimit),
+          pch = 2, cex.main = 1, frame.plot = FALSE, col = "blue", panel.first=grid())
+```
+
+# Isolation Forest Intro
+
+An Isolation Forest is an ensemble of completely random decision trees. At each split a random feature and a random split point is chosen. Anomalies are isolated if they end up in a partition far away from the rest of the data. In decision tree terms, this corresponds to a record that has a short "path length". The path length is the number of nodes that a record passes through before terminating in a leaf node. Records with short average path lengths through the entire ensemble are considered anomalies.
+
+## Contrived Example
+
+```{r echo=FALSE}
+rm(list = ls())
+```
+
+```{r echo=FALSE, eval=FALSE}
+#https://github.com/Zelazny7/isofor
+devtools::install_local("C:\\Users\\czbs7d\\Documents\\R\\packagesGithub\\isofor-master.zip")
+```
+
+```{r}
+N = 1e3
+x = c(rnorm(N, 0, 0.5), rnorm(N*0.05, -1.5, 1))
+y = c(rnorm(N, 0, 0.5), rnorm(N*0.05,  1.5, 1))
+ol = c(rep(0, N), rep(1, (0.05*N))) + 2
+data = data.frame(x, y)
+plot(data, pch=ol)
+title("Dummy Data & Outliers")
+```
+
+Build an Isolation Forest by passing in the dummy data, the number of trees requested (100) and the number of records to subsample for each tree (32). The records that exceed the 95% percentile of the anomaly score should flag the most anomalous records. 
+
+```{r}
+library(isofor)
+mod = iForest(X = data, 100, 32)
+p = predict(mod, data)
+col = ifelse(p > quantile(p, 0.95), "red", "blue")
+plot(x, y, col=col, pch=ol)
+```
+
+Knowing there are two populations, the Kmeans algorithm seems like a good fit for identifying the two clusters. However, it picks cluster centers that do not do a good job of separating the data.
+
+```{r}
+km = kmeans(data, 2)
+plot(x, y, col=km$cluster+1, pch=ol)
+```
+
+## Results Comparison
+
+Compare the accuracy of identifying outliers by comparing the confusion matrix for each classification.
+
+```{r}
+table(iForest = p > quantile(p, 0.95), Actual=ol == 3)
+```
+```{r}
+table(KMeans=km$cluster == 1, Actual=ol == 3)
+```
+
+Reference:  https://github.com/LaranIkal/ProductAnomaliesDetection/blob/master/AnomalyDetectionDeepLearning.Rmd
+

@@ -1,0 +1,664 @@
+---
+title: "Machine Learning with MLR"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: show
+---
+<style type="text/css">
+p{ /* Normal  */
+   font-size: 14px;
+   line-height: 18px;}
+body{ /* Normal  */
+   font-size: 14px;}
+td {  /* Table  */
+   font-size: 12px;}
+h1 { /* Header 1 */
+ font-size: 26px;
+ color: #4294ce;}
+h2 { /* Header 2 */
+ font-size: 22px;}
+h3 { /* Header 3 */
+ font-size: 18px;}
+
+code.r{ /* Code block */
+  font-size: 12px;}
+pre { /* Code block */
+  font-size: 12px}
+
+#table-of-contents h2 {background-color: #4294ce;}
+
+#table-of-contents{background: #688FAD;}
+#nav-top span.glyphicon{color: #4294ce;}
+#postamble{background: #4294ce;border-top: ;}
+</style>
+---
+
+# Introduction
+
+Heavily borrowed from this [blog article](https://www.analyticsvidhya.com/blog/2016/08/practicing-machine-learning-techniques-in-r-with-mlr-package/#)
+
+MLR is a comprehnesive R Package providing all the tools to fully execute a machine learning project.  Below, an introduction to MLR is provided.  *There is much more to learn!*
+ 
+MLR defines a specific flow/process:
+
+- **Creating a task** means loading data in the package. 
+- **Making a learner** means choosing an algorithm ( learner) which learns from task (or data). 
+- **Train the learners**
+
+MLR package has several algorithms in its arsenal. These algorithms have been categorized into regression, classification, clustering, survival, multiclassification and cost sensitive classification. Let’s look at some of the available algorithms for classification problems:
+
+```{r message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("dplyr", "mlr", "funModeling",  prompt = FALSE)
+
+head(listLearners("classif")[c("class","package")], 20)
+```
+
+# Getting Data
+
+The data is from an hackathon hosted by [Analytics Vidhya](https://datahack.analyticsvidhya.com/contest/practice-problem-loan-prediction-iii/)
+
+```{r}
+setwd("~/R")
+
+train <- read.csv("data/mlrIntro_train.csv", na.strings = c(""," ",NA))
+test <- read.csv("./data/mlrIntro_test.csv", na.strings = c(""," ",NA))
+``` 
+# Exploring Data
+
+Once the data is loaded, you can access it using:
+
+```{r}
+summarizeColumns(train)
+```
+
+This function gives a much comprehensive view of the data set as compared to base str() function. Shown above are the last 5 rows of the result. Similarly you can do for test data also:
+
+From these outputs, we can make the following inferences:
+
+- In the data, we have 12 variables, out of which Loan_Status is the dependent variable and rest are independent variables.
+- Train data has 614 observations. Test data has 367 observations.
+- In train and test data, 6 variables have missing values (can be seen in na column).
+- ApplicantIncome and Coapplicant Income are highly skewed variables. How do we know that ? Look at their min, max and median value. We’ll have to normalize these variables.
+- LoanAmount, ApplicantIncome and CoapplicantIncome has outlier values, which should be treated.
+- Credit_History is an integer type variable. But, being binary in nature, we should convert it to factor.
+
+Recall `funModeling` also provide useful summary information:
+
+```{r}
+df_status(train)
+```
+
+Also, you can check the presence of skewness in variables mentioned above using a simple histogram.
+
+```{r}
+hist(train$ApplicantIncome, breaks = 300, main = "Applicant Income Chart",xlab = "ApplicantIncome")
+```
+```{r}
+hist(train$CoapplicantIncome, breaks = 100,main = "Coapplicant Income Chart",xlab = "CoapplicantIncome")
+```
+
+As you can see in charts above, skewness is nothing but concentration of majority of data on one side of the chart. What we see is a right skewed graph. 
+
+`funMoldeling` provides data snapshots:
+
+```{r}
+plot_num(train)
+```
+
+To visualize outliers, we can use a boxplot:
+
+```{r}
+boxplot(train$ApplicantIncome)
+```
+
+Similarly, you can create a boxplot for CoapplicantIncome and LoanAmount as well.  `funModeling` makes this simple.
+
+```{r}
+plotar(data = train, str_input = c("CoapplicantIncome", "LoanAmount"),str_target = "Gender",  plot_type = "boxplot")
+```
+
+
+Change the class of Credit_History to factor. Remember, the class factor is always used for categorical variables.
+```{r}
+train$Credit_History <- as.factor(train$Credit_History)
+test$Credit_History <- as.factor(test$Credit_History)
+```
+
+To check the changes, you can do:
+
+```{r}
+class(train$Credit_History)
+```
+
+You can further scrutinize the data using:
+
+```{r}
+summary(train)
+```
+
+We find that the variable `Dependents` has a level 3+ which shall be treated too. It’s simple to modify the name levels in a factor variable. It can be done as:
+
+```{r}
+#rename level of Dependents
+levels(train$Dependents)[4] <- "3"
+levels(test$Dependents)[4] <- "3"
+```
+
+# Missing Value Imputation
+
+Many struggle with missing value imputation. `MLR` offers a convenient way to impute missing value using multiple methods. 
+
+Use basic mean and mode imputation to impute data. You can also use any ML algorithm to impute these values, but that comes at the cost of computation.
+
+```{r}
+#impute missing values by mean and mode
+imp <- impute(train, classes = list(factor = imputeMode(), integer = imputeMean()), dummy.classes = c("integer","factor"), dummy.type = "numeric")
+imp1 <- impute(test, classes = list(factor = imputeMode(), integer = imputeMean()), dummy.classes = c("integer","factor"), dummy.type = "numeric")
+```
+
+This function is convenient because you don’t have to specify each variable name to impute. It selects variables on the basis of their classes. It also creates new dummy variables for missing values. Sometimes, these (dummy) features contain a trend which can be captured using this function. dummy.classes says for which classes should I create a dummy variable. dummy.type says what should be the class of new dummy variables.
+
+```{r}
+imp_train <- imp$data
+imp_test <- imp1$data
+```
+
+Now, we have the complete data. You can check the new variables using:
+
+```{r}
+summarizeColumns(imp_train)
+summarizeColumns(imp_test)
+```
+
+Did you notice a disparity among both data sets? No ? See again. The answer is Married.dummy variable exists only in imp_train and not in imp_test. Therefore, we’ll have to remove it before modeling stage.
+
+Optional: You might be excited or curious to try out imputing missing values using a ML algorithm. In fact, there are some algorithms which don’t require you to impute missing values. You can simply supply them missing data. They take care of missing values on their own. Let’s see which algorithms are they:
+
+```{r}
+listLearners("classif", check.packages = TRUE, properties = "missings")[c("class","package")]
+```
+
+However, it is always advisable to treat missing values separately. Let’s see how can you treat missing value using rpart:
+
+```{r rpart_impute}
+rpart_imp <- impute(train, target = "Loan_Status",
+classes = list(numeric = imputeLearner(makeLearner("regr.rpart")),
+factor = imputeLearner(makeLearner("classif.rpart"))),
+dummy.classes = c("numeric","factor"),
+dummy.type = "numeric")
+```
+
+# Feature Engineering
+
+Feature Engineering is the most interesting part of predictive modeling. So, feature engineering has two aspects: Feature Transformation and Feature Creation. We’ll try to work on both the aspects here.
+
+At first, remove outliers from variables like `ApplicantIncome`, `CoapplicantIncome`, `LoanAmount`. There are many techniques to remove outliers. Cap all the large values in these variables and set them to a threshold value as shown below:
+
+```{r}
+#for train data set
+cd <- capLargeValues(imp_train, target = "Loan_Status", cols = c("ApplicantIncome"), threshold = 40000)
+cd <- capLargeValues(cd, target = "Loan_Status", cols = c("CoapplicantIncome"), threshold = 21000)
+cd <- capLargeValues(cd, target = "Loan_Status", cols = c("LoanAmount"), threshold = 520)
+#rename the train data as cd_train
+cd_train <- cd
+#add a dummy Loan_Status column in test data
+imp_test$Loan_Status <- sample(0:1, size = 367, replace = T)
+cde <- capLargeValues(imp_test, target = "Loan_Status", cols = c("ApplicantIncome"), threshold = 33000)
+cde <- capLargeValues(cde, target = "Loan_Status",cols = c("CoapplicantIncome"), threshold = 16000)
+cde <- capLargeValues(cde, target = "Loan_Status", cols = c("LoanAmount"), threshold = 470)
+#renaming test data
+cd_test <- cde
+```
+
+Treshold value selected with discretion, after analyzing the variable distribution. To check the effects, you can do `summary(cd_train$ApplicantIncome`) and see that the maximum value is capped at 33000.
+
+In both data sets, we see that all dummy variables are numeric in nature. Being binary in form, they should be categorical. Let’s convert their classes to factor. This time, we’ll use simple for and if loops.
+
+```{r}
+#convert numeric to factor - train
+for (f in names(cd_train[, c(14:20)])) {
+  if( class(cd_train[, c(14:20)] [[f]]) == "numeric"){
+  levels <- unique(cd_train[, c(14:20)][[f]])
+  cd_train[, c(14:20)][[f]] <- as.factor(factor(cd_train[, c(14:20)][[f]], levels = levels))
+    }
+  }
+#convert numeric to factor - test
+for (f in names(cd_test[, c(13:18)])) {
+  if( class(cd_test[, c(13:18)] [[f]]) == "numeric"){
+    levels <- unique(cd_test[, c(13:18)][[f]])
+    cd_test[, c(13:18)][[f]] <- as.factor(factor(cd_test[, c(13:18)][[f]], levels = levels))
+    }
+}
+```
+
+These loops say – *for every column name which falls column number 14 to 20 of cd_train / cd_test data frame, if the class of those variables in numeric, take out the unique value from those columns as levels and convert them into a factor (categorical) variables*.
+
+Create some new features.
+
+```{r}
+#Total_Income
+cd_train$Total_Income <- cd_train$ApplicantIncome + cd_train$CoapplicantIncome
+cd_test$Total_Income <- cd_test$ApplicantIncome + cd_test$CoapplicantIncome
+#Income by loan
+cd_train$Income_by_loan <- cd_train$Total_Income/cd_train$LoanAmount
+cd_test$Income_by_loan <- cd_test$Total_Income/cd_test$LoanAmount
+#change variable class
+cd_train$Loan_Amount_Term <- as.numeric(cd_train$Loan_Amount_Term)
+cd_test$Loan_Amount_Term <- as.numeric(cd_test$Loan_Amount_Term)
+#Loan amount by term
+cd_train$Loan_amount_by_term <- cd_train$LoanAmount/cd_train$Loan_Amount_Term
+cd_test$Loan_amount_by_term <- cd_test$LoanAmount/cd_test$Loan_Amount_Term
+```
+
+While creating new features(if they are numeric), we must check their correlation with existing variables as there are high chances often. Let’s see if our new variables too happens to be correlated:
+
+```{r}
+#splitting the data based on class
+az <- split(names(cd_train), sapply(cd_train, function(x){ class(x)}))
+#creating a data frame of numeric variables
+xs <- cd_train[az$numeric]
+#check correlation
+cor(xs)
+```
+
+As we see, there exists a very high correlation of Total_Income with ApplicantIncome. It means that the new variable isn’t providing any new information. Thus, this variable is not helpful for modeling data.
+
+Now we can remove the variable.
+
+```{r}
+cd_train$Total_Income <- NULL
+cd_test$Total_Income <- NULL
+```
+
+There is still enough potential left to create new variables. Before proceeding, I want you to think deeper on this problem and try creating newer variables. After doing so much modifications in data, let’s check the data again:
+
+```{r}
+summarizeColumns(cd_train)
+summarizeColumns(cd_test)
+```
+ 
+# Machine Learning
+
+Until here, we’ve performed all the important transformation steps except normalizing the skewed variables. That will be done after we create the task.
+
+As explained in the beginning, for mlr, a task is nothing but the data set on which a learner learns. Since, it’s a classification problem, we’ll create a classification task. So, the task type solely depends on type of problem at hand.
+
+```{r}
+#create a task
+trainTask <- makeClassifTask(data = cd_train,target = "Loan_Status")
+testTask <- makeClassifTask(data = cd_test, target = "Loan_Status")
+```
+
+Check trainTask - 
+
+```{r}
+trainTask
+```
+
+As you can see, it provides a description of cd_train data. However, an evident problem is that it is considering positive class as N, whereas it should be Y. Modify it:
+
+```{r}
+trainTask <- makeClassifTask(data = cd_train,target = "Loan_Status", positive = "Y")
+```
+
+For a deeper view, you can check your task data using `str(getTaskData(trainTask))`.
+
+Now normalize the data. For this step, use `normalizeFeatures` from `mlr`. By default, this packages normalizes all the numeric features in the data. Thankfully, only 3 variables which we have to normalize are numeric, rest of the variables have classes other than numeric.
+
+```{r normalize}
+#normalize the variables
+trainTask <- normalizeFeatures(trainTask,method = "standardize")
+testTask <- normalizeFeatures(testTask,method = "standardize")
+```
+
+Before we start applying algorithms, we should remove the variables which are not required.
+
+```{r}
+trainTask <- dropFeatures(task = trainTask, features = c("Loan_ID","Married.dummy"))
+```
+
+`MLR` has an in built function which returns the important variables from data. See which variables are important. Later, we can use this knowledge to subset out input predictors for model improvement. While running this code, R might prompt you to install `FSelector`.
+
+```{r}
+#Feature importance
+im_feat <- generateFilterValuesData(trainTask, method = c("information.gain", "chi.squared"))
+plotFilterValues(im_feat, n.show = 20)
+```
+
+```{r}
+#to launch its shiny application
+plotFilterValuesGGVIS(im_feat)
+```
+
+Information gain is generally used in context with decision trees. Every node split in a decision tree is based on information gain. In general, it tries to find out variables which carries the maximum information using which the target class is easier to predict.
+
+# Modeling
+
+With `MLR`, we can choose & set algorithms using `makeLearner`. This learner will train on `trainTask` and try to make predictions on `testTask`.
+ 
+## Quadratic Discriminant Analysis (QDA)
+
+`qda` is a parametric algorithm. Parametric means that it makes certain assumptions about data. If the data is actually found to follow the assumptions, such algorithms sometime outperform several non-parametric algorithms.
+
+```{r qda_model}
+#load qda 
+qda.learner <- makeLearner("classif.qda", predict.type = "response")
+#train model
+qmodel <- train(qda.learner, trainTask)
+#predict on test data
+qpredict <- predict(qmodel, testTask)
+#create submission file
+submit <- data.frame(Loan_ID = test$Loan_ID, Loan_Status = qpredict$data$response)
+#write.csv(submit, "submit1.csv",row.names = F)
+```
+
+Upload this submission file and check your leaderboard rank (wouldn’t be good). Our accuracy is ~ 71.5%. I understand, this submission might not put you among the top on leaderboard, but there’s along way to go. So, let’s proceed.
+ 
+## Logistic Regression
+
+This time, let’s also check cross validation accuracy. Higher CV accuracy determines that our model does not suffer from high variance and generalizes well on unseen data.
+
+```{r logistic_model}
+#logistic regression
+logistic.learner <- makeLearner("classif.logreg", predict.type = "response")
+#cross validation (cv) accuracy
+cv.logistic <- crossval(learner = logistic.learner, task = trainTask, iters = 3, stratify = TRUE, measures = acc, show.info = F)
+```
+
+Similarly, you can perform CV for any learner. Isn’t it incredibly easy? So, I’ve used stratified sampling with 3 fold CV. I’d always recommend you to use stratified sampling in classification problems since it maintains the proportion of target class in n folds. We can check CV accuracy by:
+
+```{r}
+#cross validation accuracy
+cv.logistic$aggr
+acc.test.mean
+```
+
+This is the average accuracy calculated on 5 folds. To see, respective accuracy each fold, we can do this:
+
+```{r}
+cv.logistic$measures.test
+```
+
+Now, we’ll train the model and check the prediction accuracy on test data.
+
+```{r}
+#train model
+fmodel <- train(logistic.learner,trainTask)
+getLearnerModel(fmodel)
+#predict on test data
+fpmodel <- predict(fmodel, testTask)
+#create submission file
+submit <- data.frame(Loan_ID = test$Loan_ID, Loan_Status = fpmodel$data$response)
+#write.csv(submit, "submit2.csv",row.names = F)
+```
+
+Woah! This algorithm gave us a significant boost in accuracy. Moreover, this is a stable model since our CV score and leaderboard score matches closely. This submission returns accuracy of 79.16%. Good, we are improving now. Let’s get ahead to the next algorithm.
+ 
+## Decision Tree
+
+A decision tree is said to capture non-linear relations better than a logistic regression model. Let’s see if we can improve our model further. This time we’ll hyper tune the tree parameters to achieve optimal results. To get the list of parameters for any algorithm, simply write (in this case rpart):
+
+```{r}
+getParamSet("classif.rpart")
+```
+
+This will return a long list of tunable and non-tunable parameters. Let’s build a decision tree now. Make sure you have installed the rpart package before creating the tree learner:
+
+```{r}
+#make tree learner
+makeatree <- makeLearner("classif.rpart", predict.type = "response")
+#set 3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+```
+
+I’m doing a 3 fold CV because we have less data. Now, let’s set tunable parameters:
+
+```{r}
+#Search for hyperparameters
+gs <- makeParamSet(
+makeIntegerParam("minsplit",lower = 10, upper = 50),
+makeIntegerParam("minbucket", lower = 5, upper = 50),
+makeNumericParam("cp", lower = 0.001, upper = 0.2))
+```
+
+As you can see, I’ve set 3 parameters. minsplit represents the minimum number of observation in a node for a split to take place. minbucket says the minimum number of observation I should keep in terminal nodes. cp is the complexity parameter. The lesser it is, the tree will learn more specific relations in the data which might result in overfitting.
+
+```{r}
+#do a grid search
+gscontrol <- makeTuneControlGrid()
+#hypertune the parameters
+stune <- tuneParams(learner = makeatree, resampling = set_cv, task = trainTask, par.set = gs, control = gscontrol, measures = acc)
+```
+
+You may go and take a walk until the parameter tuning completes. May be, go catch some pokemons! It took 15 minutes to run at my machine. I’ve 8GB intel i5 processor windows machine.
+
+```{r}
+#check best parameter
+stune$x
+```
+
+It returns a list of best parameters. You can check the CV accuracy with:
+
+```{r}
+#cross validation result
+stune$y
+```
+
+Using setHyperPars function, we can directly set the best parameters as modeling parameters in the algorithm.
+
+```{r}
+#using hyperparameters for modeling
+t.tree <- setHyperPars(makeatree, par.vals = stune$x)
+#train the model
+t.rpart <- train(t.tree, trainTask)
+getLearnerModel(t.rpart)
+#make predictions
+tpmodel <- predict(t.rpart, testTask)
+#create a submission file
+submit <- data.frame(Loan_ID = test$Loan_ID, Loan_Status = tpmodel$data$response)
+#write.csv(submit, "submit3.csv",row.names = F)
+```
+
+Decision Tree is doing no better than logistic regression. This algorithm has returned the same accuracy of 79.14% as of logistic regression. So, one tree isn’t enough. Let’s build a forest now.
+ 
+## Random Forest
+
+Random Forest is a powerful algorithm known to produce astonishing results. Actually, it’s prediction derive from an ensemble of trees. It averages the prediction given by each tree and produces a generalized result. From here, most of the steps would be similar to followed above, but this time I’ve done random search instead of grid search for parameter tuning, because it’s faster.
+
+```{r}
+getParamSet("classif.randomForest")
+#create a learner
+rf <- makeLearner("classif.randomForest", predict.type = "response", par.vals = list(ntree = 200, mtry = 3))
+rf$par.vals <- list(
+importance = TRUE
+)
+#set tunable parameters
+#grid search to find hyperparameters
+rf_param <- makeParamSet(
+makeIntegerParam("ntree",lower = 50, upper = 500),
+makeIntegerParam("mtry", lower = 3, upper = 10),
+makeIntegerParam("nodesize", lower = 10, upper = 50))
+#let's do random search for 50 iterations
+rancontrol <- makeTuneControlRandom(maxit = 50L)
+```
+
+Though, random search is faster than grid search, but sometimes it turns out to be less efficient. In grid search, the algorithm tunes over every possible combination of parameters provided. In a random search, we specify the number of iterations and it randomly passes over the parameter combinations. In this process, it might miss out some important combination of parameters which could have returned maximum accuracy, who knows.
+
+```{r}
+#set 3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+#hypertuning
+rf_tune <- tuneParams(learner = rf, resampling = set_cv, task = trainTask, par.set = rf_param, control = rancontrol, measures = acc)
+```
+
+Now, we have the final parameters. Let’s check the list of parameters and CV accuracy.
+
+```{r}
+#cv accuracy
+> rf_tune$y
+acc.test.mean 
+```
+```{r}
+#best parameters
+rf_tune$x
+```
+
+Let’s build the random forest model now and check its accuracy.
+
+```{r}
+#using hyperparameters for modeling
+rf.tree <- setHyperPars(rf, par.vals = rf_tune$x)
+#train a model
+rforest <- train(rf.tree, trainTask)
+getLearnerModel(t.rpart)
+#make predictions
+rfmodel <- predict(rforest, testTask)
+#submission file
+submit <- data.frame(Loan_ID = test$Loan_ID, Loan_Status = rfmodel$data$response)
+#write.csv(submit, "submit4.csv",row.names = F)
+```
+
+No new story to cheer about. This model too returned an accuracy of 79.14%. So, try using grid search instead of random search, and tell me in comments if your model improved.
+ 
+## SVM
+
+Support Vector Machines (SVM) is also a supervised learning algorithm used for regression and classification problems. In general, it creates a hyperplane in n dimensional space to classify the data based on target class. Let’s step away from tree algorithms for a while and see if this algorithm can bring us some improvement.
+
+Since, most of the steps would be similar as performed above, I don’t think understanding these codes for you would be a challenge anymore.
+
+```{r}
+#load svm
+getParamSet("classif.ksvm") #do install kernlab package 
+ksvm <- makeLearner("classif.ksvm", predict.type = "response")
+#Set parameters
+pssvm <- makeParamSet(
+makeDiscreteParam("C", values = 2^c(-8,-4,-2,0)), #cost parameters
+makeDiscreteParam("sigma", values = 2^c(-8,-4,0,4)) #RBF Kernel Parameter
+)
+#specify search function
+ctrl <- makeTuneControlGrid()
+#tune model
+res <- tuneParams(ksvm, task = trainTask, resampling = set_cv, par.set = pssvm, control = ctrl,measures = acc)
+#CV accuracy
+res$y
+acc.test.mean 
+```
+```{r}
+#set the model with best params
+t.svm <- setHyperPars(ksvm, par.vals = res$x)
+#train
+par.svm <- train(ksvm, trainTask)
+#test
+predict.svm <- predict(par.svm, testTask)
+#submission file
+submit <- data.frame(Loan_ID = test$Loan_ID, Loan_Status = predict.svm$data$response)
+#write.csv(submit, "submit5.csv",row.names = F)
+```
+
+This model returns an accuracy of 77.08%. Not bad, but lesser than our highest score. Don’t feel hopeless here. This is core machine learning. ML doesn’t work unless it gets some good variables. May be, you should think longer on feature engineering aspect, and create more useful variables. Let’s do boosting now.
+ 
+## GBM
+
+Now you are entering the territory of boosting algorithms. GBM performs sequential modeling i.e after one round of prediction, it checks for incorrect predictions, assigns them relatively more weight and predict them again until they are predicted correctly.
+
+```{r}
+#load GBM
+getParamSet("classif.gbm")
+g.gbm <- makeLearner("classif.gbm", predict.type = "response")
+#specify tuning method
+rancontrol <- makeTuneControlRandom(maxit = 50L)
+#3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+#parameters
+gbm_par<- makeParamSet(
+makeDiscreteParam("distribution", values = "bernoulli"),
+makeIntegerParam("n.trees", lower = 100, upper = 1000), #number of trees
+makeIntegerParam("interaction.depth", lower = 2, upper = 10), #depth of tree
+makeIntegerParam("n.minobsinnode", lower = 10, upper = 80),
+makeNumericParam("shrinkage",lower = 0.01, upper = 1)
+)
+```
+
+**n.minobsinnode** refers to the minimum number of observations in a tree node. **shrinkage** is the regulation parameter which dictates how fast / slow the algorithm should move.
+
+```{r}
+#tune parameters
+tune_gbm <- tuneParams(learner = g.gbm, task = trainTask,resampling = set_cv,measures = acc,par.set = gbm_par,control = rancontrol)
+#check CV accuracy
+tune_gbm$y
+#set parameters
+final_gbm <- setHyperPars(learner = g.gbm, par.vals = tune_gbm$x)
+#train
+to.gbm <- train(final_gbm, traintask)
+#test 
+pr.gbm <- predict(to.gbm, testTask)
+#submission file
+submit <- data.frame(Loan_ID = test$Loan_ID, Loan_Status = pr.gbm$data$response)
+#write.csv(submit, "submit6.csv",row.names = F)
+```
+
+The accuracy of this model is 78.47%. GBM performed better than SVM, but couldn’t exceed random forest’s accuracy. Finally, let’s test XGboost also.
+ 
+## Xgboost
+
+`Xgboost` is considered to be better than `GBM` because of its inbuilt properties including first and second order gradient, parallel processing and ability to prune trees. General implementation of `xgboost` requires you to convert the data into a matrix. With `mlr`, that is not required.
+
+A benefit of using `MLR` is that you can follow same set of commands for implementing different algorithms.
+
+```{r}
+#load xgboost
+set.seed(1001)
+getParamSet("classif.xgboost")
+#make learner with inital parameters
+xg_set <- makeLearner("classif.xgboost", predict.type = "response")
+xg_set$par.vals <- list(
+objective = "binary:logistic",
+eval_metric = "error",
+nrounds = 250
+)
+#define parameters for tuning
+xg_ps <- makeParamSet(
+makeIntegerParam("nrounds",lower=200,upper=600),
+makeIntegerParam("max_depth",lower=3,upper=20),
+makeNumericParam("lambda",lower=0.55,upper=0.60),
+makeNumericParam("eta", lower = 0.001, upper = 0.5),
+makeNumericParam("subsample", lower = 0.10, upper = 0.80),
+makeNumericParam("min_child_weight",lower=1,upper=5),
+makeNumericParam("colsample_bytree",lower = 0.2,upper = 0.8)
+)
+#define search function
+rancontrol <- makeTuneControlRandom(maxit = 100L) #do 100 iterations
+#3 fold cross validation
+set_cv <- makeResampleDesc("CV",iters = 3L)
+#tune parameters
+xg_tune <- tuneParams(learner = xg_set, task = trainTask, resampling = set_cv,measures = acc,par.set = xg_ps, control = rancontrol)
+#set parameters
+xg_new <- setHyperPars(learner = xg_set, par.vals = xg_tune$x)
+#train model
+xgmodel <- train(xg_new, trainTask)
+#test model
+predict.xg <- predict(xgmodel, testTask)
+#submission file
+submit <- data.frame(Loan_ID = test$Loan_ID, Loan_Status = predict.xg$data$response)
+#write.csv(submit, "submit7.csv",row.names = F)
+```
+
+This model returns an accuracy of 68.5%, even lower than qda. What could happen ? Overfitting. So, this model returned CV accuracy of ~ 80% but leaderboard score declined drastically, because the model couldn’t predict correctly on unseen data.
+ 
+What can you do next? Feature Selection ?
+
+For improvement, let’s do this. Until here, we’ve used `trainTask` for model building. Let’s use the knowledge of important variables. Take first 6 important variables and train the models on them. You can expect some improvement. To create a task selecting important variables, do this:
+
+```{r}
+#selecting top 6 important features
+top_task <- filterFeatures(trainTask, method = "rf.importance", abs = 6)
+```
+
+So, I’ve asked this function to get me top 6 important features using the random forest importance feature. 
+
+Now, replace `top_task` with `trainTask` in models above, and tell me in comments if you got any improvement.
+
+Also, try to create more features. The current leaderboard winner is at ~81% accuracy. If you have followed me till here, don’t give up now.

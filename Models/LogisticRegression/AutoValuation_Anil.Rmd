@@ -1,0 +1,167 @@
+---
+title: "Auto Valuation - Anil"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: vignette
+---
+
+# Introduction
+
+Quick example of data that supports a nested logistic regression and one that does not - the Auto Valuation data.
+
+Perhaps the differences in the data will highlight the issue with the Auto Valuation data.
+
+This document may challenge the selection of nested logistic regression as the correct algorithm to use, but it also supplies promise that alternatives do exist.  It is also note worthy that nested logistic regression, when used properly, often provides only marginal improvements to to competing models.
+
+```{r message=FALSE, warning=FALSE, echo=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("dplyr", "mlogit", "AER", "readr", "tictoc",  prompt = FALSE)
+```
+
+#Nested Logistic Models
+
+## Working Model Example
+
+- Get the data and take a peek at it:
+
+```{r}
+data("TravelMode", package="AER")
+```
+
+The sample data has the following features.  
+
+- individual: Factor indicating individual with levels 1 to 200
+- mode: Factor indicating travel mode with levels "car", "air", "train", or "bus"
+- choice: Factor indicating choice with levels "no" and "yes"
+- wait: Terminal waiting time, 0 for car
+- vcost: Vehicle cost component
+- travel: Travel time in the vehicle
+- gcost: Generalized cost measure.
+- income: Household income
+- size: Party size
+
+> Sample data includes features that directly influence the choice in selecting car, air, train or bus
+
+```{r}
+glimpse(TravelMode)
+```
+
+- Format the data prior to executing the model:
+
+```{r}
+TravelMode$avinc <- with(TravelMode,(mode=='air')*income)
+TravelMode <- mlogit.data(TravelMode,choice="choice",shape="long", alt.var="mode",chid.var="individual")
+```
+
+The transformation above simply modifies the row names as can be seen below.
+
+- View the data just prior to modeling:
+
+```{r}
+head(TravelMode)
+```
+
+- Run the model and view results:
+
+> `wait`, `gcost` and `avinc` are features that impact the choice selection.
+
+```{r}
+tic(quiet = TRUE)
+nl.TM <- mlogit(choice ~ wait + gcost + avinc, TravelMode, reflevel = "car", nests = list(fly = "air", ground = c("train", "bus", "car")), unscaled=TRUE)
+```
+```{r echo=FALSE}
+toc()
+```
+
+View model results:
+
+```{r}
+summary(nl.TM)
+```
+
+## Model - Auto Valuation
+
+> The data is transformed to match the working model above
+
+- Import the raw AutoVal data:
+
+```{r}
+tic(quiet = TRUE)
+autoVal <- read_csv("S:/AutoNestLog/sample1.csv")
+```
+```{r echo=FALSE}
+toc()
+```
+```{r}
+glimpse(autoVal)
+```
+
+- Transform data to match working model format above
+
+1. Rename `event_type`, `person_id` and `decsision`.  Remove columns `active`, `repo`, and `skip`.  (Their information value is already captured in `mode`)
+```{r}
+autoVal <- autoVal %>% rename(mode = event_type, individual = person_id, choice = decision)
+
+autoVal <- autoVal %>% select(-(active:skip))
+
+autoVal$mode[autoVal$mode == 1] <- "Active"
+autoVal$mode[autoVal$mode == 2] <- "Repo"
+autoVal$mode[autoVal$mode == 3] <- "Skip"
+```
+
+2. Change `choice` to `TRUE` and `FALSE` values:
+
+```{r}
+autoVal$choice[autoVal$choice == 1] <- "TRUE"
+autoVal$choice[autoVal$choice == 0] <- "FALSE"
+```
+
+3. Transform data types:  fCB becomes `int` and `individual`, `choice`, and `mode` become factors:
+
+```{r}
+autoVal$fCB <- as.integer(autoVal$fCB)
+
+autoVal <- autoVal %>% mutate_at(vars("individual", "choice", "mode"), funs(factor(.)))
+autoVal <- select(autoVal, individual, mode, choice, everything())
+autoVal <- as.data.frame(autoVal)
+```
+
+4. Examine transformed data.
+
+```{r}
+glimpse(autoVal)
+```
+
+5. Prepare the data for algorithm execution:
+
+```{r}
+autoVal_logit <- mlogit.data(autoVal, choice = "choice", shape = "long", alt.var = "mode", chid.var = "individual")
+head(autoVal_logit)
+```
+
+6. View the data just before modeling.  Note the data looks exactly like the sample data used in the first example.  However, just because the data has been properly transformed, the modeling fails. No matter what auto val features are used as choice alternatives, the model fails.
+
+> Auto Val data does not contain any choice alternatives - a requirement for nested logistic regession
+
+6. Attempt to execute the nested logistic regression.
+```{r results= TRUE, error = TRUE}
+tic(quiet = TRUE)
+myNest <- mlogit(choice ~ MOB, autoVal_logit, reflevel = "Repo", nests = list(Good = "Active", Bad = c("Repo", "Skip")), unscaled = TRUE)
+```
+```{r echo = FALSE}
+toc()
+```
+
+See error help here:
+
+Error:  https://stackoverflow.com/questions/47012554/error-in-mlogit-package-system-is-computationally-singular-reciprocal-conditio
+
+Because there is no variation in the variables (`fCB`, `LTV24`, `aPTI`, `aDTI`, `MOB`) for each individual, they are perfectly collinear.  No matter the selection of variables used in modeling, the algorithm will predictably fail.
+
+```{r message=FALSE, warning=FALSE}
+autoVal %>% select(individual, fCB, LTV24, aPTI, aDTI, MOB) %>% filter(individual == 1) 
+```
+
+

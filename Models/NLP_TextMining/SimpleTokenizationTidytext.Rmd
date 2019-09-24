@@ -21,7 +21,7 @@ n-grams, bi-grams, etc. - simple!
 
 # Data
 
-Use `itunesr` for downloading iOS App Reviews on which we’ll perform Simple Text Analysis (unigrams, bigrams, n-grams). `getReviews()` of `itunesr` helps extract reviews of Medium iOS App.
+Use `itunesr` for downloading iOS App Reviews to perform Simple Text Analysis (unigrams, bigrams, n-grams). `getReviews()` of `itunesr` helps extract reviews of Medium iOS App.
 
 ```{r}
 medium <- getReviews("828256236","us",1)
@@ -31,7 +31,7 @@ head(medium)
 
 There are two Text Columns of interest - Title and Review.
 
-To make our n-grams analysis a bit more meaningful, extract only the positive reviews (5-star) to see what’s good people are writing about Medium iOS App. 
+To make our n-grams analysis a bit more meaningful, extract only the positive reviews (5-star) to see what is good people are writing about Medium iOS App. 
 
 ```{r}
 table(medium$Rating)

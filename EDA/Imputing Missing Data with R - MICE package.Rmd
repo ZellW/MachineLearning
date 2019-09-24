@@ -1,0 +1,180 @@
+---
+title: "Imputing Data with MICE"
+output: html_document
+---
+
+##Introduction
+
+Missing data can be a not so trivial problem when analysing a dataset and accounting for it is usually not so straightforward either. 
+
+If the amount of missing data is very small relatively to the size of the dataset, then leaving out the few samples with missing features may be the best strategy in order not to bias the analysis. However leaving out available datapoints deprives the data of some amount of information and depending on your situation. You may want to look for other fixes before wiping out potentially useful data points from your dataset.
+
+While some quick fixes such as mean-substitution may be fine in some cases, these approaches usually introduce bias into the data. 
+
+The MICE package in R, helps you imputing missing values with plausible data values. These plausible values are drawn from a distribution specifically designed for each missing datapoint.
+
+Impute missing values using a the airquality dataset.  To simplify things, some data will be removed.
+
+```{r}
+data <- airquality
+data[4:10,3] <- rep(NA,7)
+data[1:5,4] <- NA
+```
+
+Replacing categorical variables is usually not advisable. Some common practice include replacing missing categorical variables with the mode of the observed ones. However, it is questionable whether it is a good choice. Even though in this case no data points are missing from the categorical variables, we remove them from our dataset (we can add them back later if needed) and take a look at the data using summary().
+
+```{r}
+data <- data[-c(5,6)]
+summary(data)
+```
+
+Apparently Ozone is the variable with the most missing datapoints. Below we are going to dig deeper into the missing data patterns.
+
+##Quick classification of missing data
+
+There are two types of missing data:
+
+- MCAR: missing completely at random. This is the desirable scenario in case of missing data. 
+- MNAR: missing not at random. Missing not at random data is a more serious issue and in this case it might be wise to check the data gathering process further and try to understand why the information is missing. For instance, if most of the people in a survey did not answer a certain question, why did they do that? Was the question unclear? 
+
+Assuming data is MCAR, too much missing data can be a problem too. Usually a safe maximum threshold is 5% of the total for large datasets. If missing data for a certain feature or sample is more than 5% then you probably should leave that feature or sample out. We therefore check for features (columns) and samples (rows) where more than 5% of the data is missing using a simple function:
+
+```{r}
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+apply(data,2,pMiss)
+apply(data,1,pMiss)
+```
+
+We see that Ozone is missing almost 25% of the datapoints, therefore we might consider either dropping it from the analysis or gather more measurements. The other variables are below the 5% threshold so we can keep them. As far as the samples are concerned, missing just one feature leads to a 25% missing data per sample. Samples that are missing 2 or more features (>50%), should be dropped if possible.
+
+##Using mice for looking at missing data pattern
+
+The mice package provides a helpful function `md.pattern()` providing a better understanding of the pattern of missing data.
+
+```{r warning=FALSE, message=FALSE}
+library(mice)
+md.pattern(data)
+```
+
+- 104 samples are complete
+- 34 samples miss only the Ozone measurement
+- 4 samples miss only the Solar.R value
+
+A perhaps more helpful visual representation can be obtained using the VIM package as follows:
+
+```{r warning=FALSE, message=FALSE}
+library(VIM)
+aggr_plot <- aggr(data, col=c('navyblue','red'), numbers=TRUE, sortVars=TRUE, 
+                  labels=names(data), cex.axis=.7, gap=3, ylab=c("Histogram of missing data","Pattern"))
+```
+
+The plot helps us understand:
+
+- almost 70% of the samples are not missing any information
+- 22% are missing the Ozone value
+- the remaining ones show other missing patterns.
+
+Another visual approach is a special box plot:
+
+```{r}
+marginplot(data[c(1,2)])
+```
+
+We are constrained at plotting 2 variables at a time only, but we can still collect some interesting insights.
+
+The red box plot on the left shows the distribution of Solar.R with Ozone missing while the blue box plot shows the distribution of the remaining datapoints. Likewhise for the Ozone box plots at the bottom of the graph.
+
+If our assumption of MCAR data is correct, then we expect the red and blue box plots to be very similar.
+
+##Imputing the missing data
+
+The mice() function takes care of the imputing process:
+
+```{r results='hide'}
+library(mice)
+tempData <- mice(data,m=5,maxit=50,meth='pmm',seed=500)
+```
+
+```{r}
+summary(tempData)
+```
+
+A couple of notes on the parameters:
+
+- m=5 refers to the number of imputed datasets. Five is the default value. 
+- meth='pmm' refers to the imputation method. In this case we are using predictive mean matching as imputation method. Other imputation methods can be used, type methods(mice) for a list of the available imputation methods. 
+
+If you would like to check the imputed data, enter the following line of code:
+
+```{r}
+head(tempData$imp$Ozone)
+```
+
+The output shows the imputed data for each observation (first column left) within each imputed dataset (first row at the top).
+
+If you need to check the imputation method used for each variable, MICE makes it very easy to do:
+
+```{r}
+tempData$meth
+```
+
+Now we can get back the completed dataset using the `complete()` function.
+
+```{r}
+completedData <- complete(tempData,1)
+```
+
+The missing values have been replaced with the imputed values in the first of the five datasets. If you wish to use another one, just change the second parameter in the `complete()` function.
+
+##Inspecting the distribution of original and imputed data 
+
+Lets compare the distributions of original and imputed data using a some useful plots.
+
+Use a scatterplot and plot Ozone against all the other variables:
+
+```{r message=FALSE, warning=FALSE}
+library(lattice)
+xyplot(tempData, Ozone ~ Wind + Temp + Solar.R, pch = 18, cex = 1)
+```
+
+We expect to see is that the shape of the magenta points (imputed) matches the shape of the blue ones (observed). The matching shape tells us that the imputed values are indeed “plausible values”.
+
+Another helpful plot is the density plot:
+
+```{r}
+densityplot(tempData)
+```
+
+The density of the imputed data for each imputed dataset is showed in magenta while the density of the observed data is showed in blue. Again, under our previous assumptions we expect the distributions to be similar.
+
+Another useful visual take on the distributions can be obtained using the `stripplot()` function that shows the distributions of the variables as individual points:
+
+```{r}
+stripplot(tempData, pch = 20, cex = 1.2)
+```
+
+##Pooling
+
+Fit a linear model to the data. The MICE package makes it easy to fit a a model to each of the imputed dataset and then pool the results together:
+
+```{r}
+modelFit1 <- with(tempData, lm(Temp ~ Ozone + Solar.R +Wind))
+summary(pool(modelFit1))
+```
+
+The variable modelFit1 containts the results of the fitting performed over the imputed datasets. The `pool()` function pools them all together. The Ozone variable is statistically significant. Note that there are other columns aside from those typical of the `lm()` model: `fmi` contains the fraction of missing information while `lambda` is the proportion of total variance that is attributable to the missing data. 
+
+We initialized the mice function with a specific seed, therefore the results are somewhat dependent on our initial choice. To reduce this effect, we can impute a higher number of dataset, by changing the default m = 5 parameter in the MICE() function.
+
+```{r results='hide'}
+tempData2 <- mice(data, m = 50)
+```
+
+```{r}
+modelFit2 <- with(tempData2, lm(Temp ~ Ozone + Solar.R + Wind))
+summary(pool(modelFit2))
+```
+
+We about the same results as before with only Ozone showing statistical significance.
+
+<span style="font-size:6; color=grey;">[See the source of this information](http://datascienceplus.com/imputing-missing-data-with-r-mice-package/).</span>

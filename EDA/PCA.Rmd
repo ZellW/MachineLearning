@@ -1,0 +1,294 @@
+---
+title: "PCA Example"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: hide
+---
+
+Remember:
+
+When individuals are described by one set of variables, several methods are available depending on the types of variables considered (numerical or categorical variables):
+
+- When variables are numericals one can perform a PCA (Principal components analysis).
+- With a contingency table, one can perform a CA (Correspondence Analysis).
+- When individuals are described by a set of categorical variables one can perform a MCA (Multiple Correspondence Analysis).
+
+PCA is particularly powerful in dealing with multicollinearity and variables that outnumber the samples.
+
+It is an unsupervised method, meaning it will always look into the greatest sources of variation regardless of the data structure. Its counterpart, the partial least squares (PLS), is a supervised method and will perform the same sort of covariance decomposition, albeit building a user-defined number of components (frequently designated as latent variables) that minimize the SSE from predicting a specified outcome with an ordinary least squares (OLS). 
+
+PLS is covered in Part 2 of this document.
+
+```{r}
+library(stats)
+# Generate scaled 4*5 matrix with random std normal samples
+set.seed(101)
+mat <- scale(matrix(rnorm(20), 4, 5))
+dimnames(mat) <- list(paste("Sample", 1:4), paste("Var", 1:5))
+ 
+# Perform PCA
+myPCA <- prcomp(mat, scale. = F, center = F)
+myPCA$rotation # loadings
+myPCA$x # scores
+```
+
+By default, prcomp will retrieve  PCs. Therefore, in our setting we expect having four PCs (n=4). The svd function will behave the same way:
+
+```{r}
+# Perform SVD
+mySVD <- svd(mat)
+mySVD # the diagonal of Sigma mySVD$d is given as a vector
+sigma <- matrix(0,4,4) # we have 4 PCs, no need for a 5th column
+diag(sigma) <- mySVD$d # sigma is now our true sigma matrix
+```
+
+Now that we have the PCA and SVD objects, let us compare the respective scores and loadings. We will compare the scores from the PCA with the product of  and  from the SVD. In R, matrix multiplication is possible with the operator %*%. Next, we will directly compare the loadings from the PCA with  from the SVD, and finally show that multiplying scores and loadings recovers . I rounded the results to five decimal digits since the results are not exactly the same! The function t retrieves a transposed matrix.
+
+```{r}
+# Compare PCA scores with the SVD's U*Sigma
+theoreticalScores <- mySVD$u %*% sigma
+all(round(myPCA$x,5) == round(theoreticalScores,5)) # TRUE
+ 
+# Compare PCA loadings with the SVD's V
+all(round(myPCA$rotation,5) == round(mySVD$v,5)) # TRUE
+ 
+# Show that mat == U*Sigma*t(V)
+recoverMatSVD <- theoreticalScores %*% t(mySVD$v)
+all(round(mat,5) == round(recoverMatSVD,5)) # TRUE
+ 
+#Show that mat == scores*t(loadings)
+recoverMatPCA <- myPCA$x %*% t(myPCA$rotation)
+all(round(mat,5) == round(recoverMatPCA,5)) # TRUE
+```
+
+PCA of the wine data set
+Now that we established the association between SVD and PCA, we will perform PCA on real data. I found a wine data set at the UCI Machine Learning Repository that might serve as a good starting example.
+
+```{r}
+wine <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/wine/wine.data", sep=",")
+```
+
+Data consist of 13 physicochemical parameters measured in 178 wine samples from three distinct cultivars grown in Italy. Let's check patterns in pairs of variables, and then see what a PCA does about that by plotting PC1 against PC2.
+
+```{r}
+# Name the variables
+colnames(wine) <- c("Cvs","Alcohol","Malic acid","Ash","Alcalinity of ash", "Magnesium", "Total phenols", "Flavanoids", "Nonflavanoid phenols", "Proanthocyanins", "Color intensity", "Hue", "OD280/OD315 of diluted wines", "Proline")
+ 
+# The first column corresponds to the classes
+wineClasses <- factor(wine$Cvs)
+ 
+# Use pairs
+pairs(wine[,-1], col = wineClasses, upper.panel = NULL, pch = 16, cex = 0.5)
+legend("topright", bty = "n", legend = c("Cv1","Cv2","Cv3"), pch = 16, col = c("black","red","green"),
+       xpd = T, cex = 2, y.intersp = 0.5)
+```
+
+Among other things, we observe correlations between variables (e.g. total phenols and flavonoids), and occasionally the two-dimensional separation of the three cultivars (e.g. using alcohol % and the OD ratio).
+
+If its hard enough looking into all pairwise interactions in a set of 13 variables, let alone in sets of hundreds or thousands of variables. In these instances PCA is of great help. Let's give it a try in this data set:
+
+```{r}
+winePCA <- prcomp(scale(wine[,-1]))
+plot(winePCA$x[,1:2], col = wineClasses)
+```
+
+Three lines of code and we see a clear separation among grape vine cultivars. In addition, the data points are evenly scattered over relatively narrow ranges in both PCs. We could next investigate which parameters contribute the most to this separation and how much variance is explained by each PC, but I will leave it for pcaMethods. We will now repeat the procedure after introducing an outlier in place of the 10th observation.
+
+```{r}
+wineOutlier <- wine
+wineOutlier[10,] <- wineOutlier[10,]*10 # change the 10th obs. into an extreme one by multiplying its profile by 10
+outlierPCA <- prcomp(scale(wineOutlier[,-1]))
+plot(outlierPCA$x[,1:2], col = wineClasses)
+```
+
+As expected, the huge variance stemming from the separation of the 10th observation from the core of all other samples is fully absorbed by the first PC. The outlying sample becomes plain evident.
+
+PCA of the wine data set with pcaMethods
+We will now turn to pcaMethods, a compact suite of PCA tools. First you will need to install it from the Bioconductor:
+
+```{r}
+source("https://bioconductor.org/biocLite.R")
+biocLite("pcaMethods")
+library(pcaMethods)
+```
+
+There are three mains reasons why some use `pcaMethods`:
+
+- Besides SVD, it provides several different methods (bayesian PCA, probabilistic PCA, robust PCA, to name a few)
+- Some of these algorithms tolerate and impute missing values
+- The object structure and plotting capabilities are user-friendly
+
+All information available about the package can be found here. I will now simply show the joint scores-loadings plots, but still encourage you to explore it further.
+
+I will select the default SVD method to reproduce our previous PCA result, with the same scaling strategy as before (UV, or unit-variance, as executed by scale). The argument scoresLoadings gives you control over printing scores, loadings, or both jointly as right next. The standard graphical parameters (e.g. cex, pch, col) preceded by either letters s or l control the aesthetics in the scores or loadings plots, respectively.
+
+```{r}
+winePCAmethods <- pca(wine[,-1], scale = "uv", center = T, nPcs = 2, method = "svd")
+slplot(winePCAmethods, scoresLoadings = c(T,T), scol = wineClasses)
+```
+
+So firstly, we have a faithful reproduction of the previous PCA plot. Then, having the loadings panel on its right side, we can claim that
+
+- Wine from Cv2 (red) has a lighter color intensity, lower alcohol %, a greater OD ratio and hue, compared to the wine from Cv1 and Cv3.
+- Wine from Cv3 (green) has a higher content of malic acid and non-flavanoid phenols, and a higher alkalinity of ash compared to the wine from Cv1 (black)
+
+Finally, although the variance jointly explained by the first two PCs is printed by default (55.41%), it might be more informative consulting the variance explained in individual PCs. We can call the structure of winePCAmethods, inspect the slots and print those of interest, since there is a lot of information contained. The variance explained per component is stored in a slot named R2.
+
+```{r}
+str(winePCAmethods) # slots are marked with @
+winePCAmethods@R2
+```
+
+Seemingly, PC1 and PC2 explain 36.2% and 19.2% of the variance in the wine data set, respectively. PCAs of data exhibiting strong effects (such as the outlier example given above) will likely result in the sequence of PCs showing an abrupt drop in the variance explained. 
+
+Screeplots are helpful in that matter, and allow you determining how much variance you can put into a principal component regression (PCR), for example, which is exactly what we will try next.
+
+PCR with the housing data set
+
+Now we will tackle a regression problem using PCR. I will use an old housing data set also deposited in the UCI MLR. Again according to its documentation, these data consist of 14 variables and 504 records from distinct towns somewhere in the US. To perform PCR all we need is conduct PCA and feed the scores of  PCs to a OLS. Let's try predicting the median value of owner-occupied houses in thousands of dollars (MEDV) using the first three PCs from a PCA.
+
+```{r}
+houses <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/housing/housing.data",header = F, na.string = "?")
+colnames(houses) <- c("CRIM", "ZN", "INDUS","CHAS","NOX","RM","AGE","DIS","RAD","TAX","PTRATIO","B","LSTAT","MEDV")
+ 
+# Perform PCA
+pcaHouses <- prcomp(scale(houses[,-14]))
+scoresHouses <- pcaHouses$x
+ 
+# Fit lm using the first 3 PCs
+modHouses <- lm(houses$MEDV ~ scoresHouses[,1:3])
+summary(modHouses)
+```
+
+The printed summary shows two important pieces of information. Firstly, the three estimated coefficients (plus the intercept) are considered significant (). Second, the predictability as defined by the  (coefficient of determination, in most cases the same as the squared Pearson correlation coefficient) was 0.63.
+
+Next we will compare this simple model to a OLS model featuring all 14 variables, and finally compare the observed vs. predicted MEDV plots from both models. Note that in the lm syntax, the response  is given to the left of the tilde and the set of predictors  to the right. Moreover, provided there is an argument for data you can circumvent the need for typing all variable names for a full model (), and simply use . .
+
+```{r}
+# Fit lm using all 14 vars
+modHousesFull <- lm(MEDV ~ ., data = houses)
+summary(modHousesFull) # R2 = 0.741
+ 
+# Compare obs. vs. pred. plots
+par(mfrow = c(1,2))
+plot(houses$MEDV, predict(modHouses), xlab = "Observed MEDV", ylab = "Predicted MEDV", 
+     main = "PCR", abline(a = 0, b = 1, col = "red"))
+plot(houses$MEDV, predict(modHousesFull), xlab = "Observed MEDV", ylab = "Predicted MEDV", 
+     main = "Full model", abline(a = 0, b = 1, col = "red"))
+```
+
+Here the full model displays a slight improvement in fit (). The high significance of most coefficient estimates is suggestive of a well-designed experiment. Nevertheless, it is notable that such a reduction of 13 down to three covariates still yields an accurate model.
+
+Just as a side note, you probably noticed both models underestimated the MEDV in towns with MEVD worth 50,000 dollars. My guess is that missing values were set to MEVD = 50.
+
+Concluding,
+
+- The SVD algorithm is founded on fundamental properties of linear algebra including matrix diagonalization. SVD-based PCA takes part of its solution and retains a reduced number of orthogonal covariates that explain as much variance as possible.
+- Use PCA when handling high-dimensional data. It is insensitive to correlation among variables and efficient in detecting sample outliers.
+- If you plan to use PCA results for subsequent analyses all care should be undertaken in the process. Although typically outperformed by numerous methods, PCR still benefits from interpretability and can be effective in many settings.
+
+PLS
+
+Above introduces principal component analysis (PCA), one of many unsupervised learning tools. The exampled ends with a demonstration of principal component regression (PCR), which essentially is a ordinary least squares (OLS) fit using the first  principal components (PCs) from the predictors. This brings about many advantages:
+
+- There is virtually no limit for the number of predictors. PCA will perform the decomposition no matter how many variables you handle. Simpler models such as OLS do not cope with more predictors than observations (i.e. ).
+- Correlated predictors do not undermine the regression fit. Collinearity is a problem for OLS, by widening the solution space, i.e. destabilizing coefficient estimation. PCA will always produce few uncorrelated PCs from a set of variables, correlated or not.
+- The PCs carry the maximum amount of variance possible. In any predictive model, predictors with zero or near-zero variance often constitute a problem and behave as second intercepts. In the process of compression, PCA will find the projections where your data points spread out the most, thus facilitating learning from the subsequent OLS.
+
+However, in many cases it is much wiser performing a decomposition similar to the PCA, yet constructing PCs that best explain the response, be it quantitative (regression) or qualitative (classification). This is the concept of partial least squares (PLS), whose PCs are more often designated latent variables (LVs), although in my understanding the two terms can be used interchangeably.
+
+PLS safeguards advantages 1. and 2. and does not necessarily follow 3. In addition, it follows that if you use the same number of  LVs and  predictors, you are going to get exactly a OLS fit - each predictor gets its own LV, so it does not help much. PLS (regression) and PLS followed by discriminant analysis (PLS-DA, classification) are tremendously useful in predictive modelling. They are adequate in a wide variety of experimental designs and linear in their parameters, therefore more easily interpretable.
+
+Now perform PLS-DA on the Arcene data set hosted at the UCI Machine Learning Repository that comprises 100 observations and 10,000 explanatory variables () in order to diagnose cancer from serum samples. From the 10,000 features, 7,000 comprise distinct mass spectrometry (MS) peaks, each determining the levels of a protein. For some reason the contributors added 3,000 random variables, probably to test robustness against noise (check more information in the link above).
+
+Let's get started with R
+
+For predictive modelling `I always use the `caret` is often preferred, which builds up on existing model packages and employs a single syntax. In addition, caret features countless functions that deal with pre-processing, imputation, summaries, plotting and much more we will see firsthand shortly.
+
+For some reason there is an empty column sticking with the data set upon loading, so I have added the colClasses argument to get rid of it. Once you load the data set take a look and note that the levels of most proteins are right-skewed, which can be a problem. However, the authors of this study conducted an exhaustive pre-processing and looking into this would take far too long. The cancer / no-cancer labels (coded as -1 / 1) are stored in a different file, so we can directly append it to the full data set and later use the formula syntax for training the models.
+
+```{r}
+# Load caret, install if necessary
+library(caret)
+arcene <- read.table("http://archive.ics.uci.edu/ml/machine-learning-databases/arcene/ARCENE/arcene_train.data", sep = " ",
+ colClasses = c(rep("numeric", 10000), "NULL"))
+ 
+# Add the labels as an additional column
+arcene$class <- factor(scan("https://archive.ics.uci.edu/ml/machine-learning-databases/arcene/ARCENE/arcene_train.labels", 
+                            sep = "\t"))
+```
+
+We can finally search missing values (NA's). If these were present it would require some form of imputation - that is not the case. Calling any(is.na(arcene)) should prompt a FALSE.
+
+So now the big questions are:
+
+- How accurately can we predict whether a patient is sick based of the MS profile of his/her blood serum?
+- Which proteins / MS peaks best discriminate sick and healthy patients?
+
+Time to get started with the function train. With respect to pre-processing we will remove zero-variance predictors and center and scale all those remaining, in this exact order using the preProc argument. Considering the size of the sample (n = 100), I will pick a 10x repeated 5-fold cross-validation (CV) - a large number of repetitions compensates for the high variance stemming from a reduced number of folds - rendering a total of 50 estimates of accuracy. Many experts advise in favor of simpler models when performance is undistinguishable, so we will apply the "one SE" rule that selects the least complex model with the average cross-validated accuracy within one standard error (SE) from that in the optimal model. Finally, we must define a range of values for the tuning parameter, the number of LVs. In this particular case we will consider all models with 1-20 LVs.
+
+```{r}
+# Compile cross-validation settings
+set.seed(100)
+myfolds <- createMultiFolds(arcene$class, k = 5, times = 10)
+control <- trainControl("repeatedcv", index = myfolds, selectionFunction = "oneSE")
+ 
+# Train PLS model
+mod1 <- train(class ~ ., data = arcene,
+ method = "pls",
+ metric = "Accuracy",
+ tuneLength = 20,
+ trControl = control,
+ preProc = c("zv","center","scale"))
+ 
+# Check CV profile
+plot(mod1)
+```
+
+This figure depicts the `CV` profile, where we can learn the average accuracy (y-axis, %) obtained from models trained with different numbers of `LVs` (x-axis). Note the swift change in accuracy among models with 1-5 LVs. Although the model with six `LVs` had the highest average accuracy, calling `mod1` in the console will show you that, because of the "one SE" rule, the selected model has five `LVs` (accuracy of 80.6%).
+
+Now compare `PLS-DA` to the classifier `homolog` of PCR  - linear discriminant analysis (LDA) following a PCA reductive-step (PCA-DA, if such thing exists). Note that the PCA pre-processing is also set in the `preProc` argument. We can also try some more complicated models, say, random forests (RF). I will not go into details about the workings and parameterisation of RF, as for today it will be purely illustrative. Note that RF will comparatively take very long (~15min in my 8Gb MacBook Pro from 2012). As usual, a simple object call will show you the summary of the corresponding CV.
+
+```{r}
+# PCA-DA
+mod2 <- train(class ~ ., data = arcene,
+method = "lda",
+metric = "Accuracy",
+trControl = control,
+preProc = c("zv","center","scale","pca"))
+ 
+# RF
+mod3 <- train(class ~ ., data = arcene,
+method = "ranger",
+metric = "Accuracy",
+trControl = control,
+tuneGrid = data.frame(mtry = seq(10,.5*ncol(arcene),length.out = 6)),
+preProc = c("zv","center","scale"))
+```
+
+Finally, we can compare `PLS-DA`, `PCA-DA` and `RF` with respect to accuracy. We will compile the three models using `caret::resamples`, borrowing the plotting capabilities of `ggplot2` to compare the 50 accuracy estimates from the optimal cross-validated model in the three cases.
+
+```{r}
+# Compile models and compare performance
+models <- resamples(list("PLS-DA" = mod1, "PCA-DA" = mod2, "RF" = mod3))
+bwplot(models, metric = "Accuracy")
+```
+
+It is clear that the long RF run did not translate into improved performance - quite the opposite. Although in average all three models have similar performances, the RF displays a much larger variance in accuracy, which is of course a concern if we seek a robust model. In this case `PLS-DA` and `PCA-DA` exhibit the best performance (63-95% accuracy) and either model would do well in diagnosing cancer in new serum samples.
+
+Now determine the ten proteins that best diagnose cancer using the variable importance in the projection (ViP), from both the `PLS-DA` and `PCA-DA`. With `varImp` this is given in relative levels (scaled to the range 0-100).
+
+```{r}
+plot(varImp(mod1), 10, main = "PLS-DA")
+plot(varImp(mod2), 10, main = "PCA-DA")
+```
+
+Very different figures, right? Idiosyncrasies aside, how many PCs did the PCA-DA use? By calling mod2$preProcess, we learn that "PCA needed 82 components to capture 95 percent of the variance". This is because the PCA pre-processing functionality in caret uses, by default, as many PCs as it takes to cover 95% of the data variance. So, in one hand we have a PLS-DA with five LVs, on the other hand a PCA-DA with 82 PCs. This not only makes PCA-DA cheaply complicated, but arcane at the interpretation level.
+
+The PLS-DA ViP plot above clearly distinguishes V1184 from all other proteins. This could be an interesting cancer biomarker. Of course, many other tests and models must be conducted in order to provide a reliable diagnostic tool. My aim here is only to introduce PLS and PLS-DA.
+
+References
+https://poissonisfish.wordpress.com/2017/01/23/principal-component-analysis-in-r/
+https://poissonisfish.wordpress.com/2017/06/17/partial-least-squares-in-r/
+http://factominer.free.fr/course/MOOC.html

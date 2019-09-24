@@ -1,0 +1,75 @@
+---
+title: 'Introduction to Time Series Anomaly Detection'
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+---
+
+```{r echo=FALSE, warning=T, message=T}
+setwd("~/R/WIP") #change as needed
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", "anomalize","coindeskr",  prompt = FALSE)
+options(digits = 3)
+```
+
+#Introduction
+
+`anomalize` makes it really simple, easy and scalable to detect anomalies in your data. It has three functions and together, they make it a straightforward process to decompose the given time series, detect any anomalies and create "bands" that separate the normal data from the anomalous one.
+
+- `anomalize` makes it really easy and scalable to detect anomalies in your time series data
+- It has three functions - `time_decompose()`, `anomalize()`, and `time_recompose()`
+- It operates within the `tidyverse` universe
+
+#Use Case Example
+
+Detect anomalies in Bitcoin Price since 2017
+
+#Data
+
+We use `get_historic_price()` from `coindeskr` to extract historic bitcoin price from Coindesk. The resulting dataframe is stored in the object btc.
+
+```{r}
+btc <- get_historic_price(start = "2017-01-01")
+head(btc)
+```
+
+For Anomaly Detection using `anomalize`, we need to have either a tibble or tibbletime object. Hence we have to convert the dataframe btc into a tibble object that follows a time series shape and store it in `btc_ts`.
+
+```{r}
+btc_ts <- btc %>% rownames_to_column() %>% as.tibble() %>% mutate(date = as.Date(rowname)) %>% select(-one_of('rowname'))
+head(btc_ts)
+```
+
+#Time Series Decomposition with Anomalies
+
+One of the important things to do with Time Series data before starting with Time Series forecasting or Modelling is Time Series Decomposition where the Time series data is decomposed into Seasonal, Trend and remainder components. `anomaliz`e has a function `time_decompose()` to perform this. Once the components are decomposed, `anomalize` can detect and flag anomalies in the decomposed data of the reminder component which then could be visualized with `plot_anomaly_decomposition()`.
+
+```{r}
+btc_ts %>% 
+  time_decompose(Price, method = "stl", frequency = "auto", trend = "auto") %>%
+  anomalize(remainder, method = "gesd", alpha = 0.05, max_anoms = 0.2) %>%
+  plot_anomaly_decomposition() 
+```
+
+As you can see from above, the decomposition happens based on `st`l method which is the common method of time series decomposition but if you have been using Twitter's `AnomalyDetection`, then the same can be implemented in anomalize by combining `time_decompose(method = "twitter")` with `anomalize(method = "gesd")`. Also the `stl` method of decomposition can also be combined with `anomalize(method = "iqr")` for a different IQR based anomaly detection.
+
+#Anomaly Detection
+
+Anomaly Detection and Plotting the detected anomalies are almost similar to what we saw above with Time Series Decomposition. It's just that decomposed components after anomaly detection are recomposed back with `time_recompose()` and plotted with `plot_anomalies()`. The package itself automatically takes care of a lot of parameter setting like index, frequency and trend, making it easier to run anomaly detection out of the box with less prior expertise in the same domain.
+
+```{r}
+btc_ts %>% time_decompose(Price) %>% anomalize(remainder) %>% time_recompose() %>%
+  plot_anomalies(time_recomposed = TRUE, ncol = 3, alpha_dots = 0.5)
+```
+
+It could be very well inferred from the given plot how accurate the anomaly detection is finding out the Bitcoin Price madness that happened during the early 2018.
+
+If you are interested in extracting the actual datapoints which are anomalies, the following code could be used:
+
+```{r}
+btc_ts %>% time_decompose(Price) %>% anomalize(remainder) %>% time_recompose() %>% filter(anomaly == 'Yes') 
+```
+
+`anomalize` makes it easier to perform anomaly detection in R with cleaner code that also could be used in any data pipeline built using `tidyverse`. 

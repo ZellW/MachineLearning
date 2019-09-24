@@ -1,0 +1,225 @@
+---
+title: "Tidyverse EDA"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: hide
+---
+
+```{r echo=FALSE, warning=TRUE, message=TRUE}
+setwd("~/R/Complete/") #change as needed
+
+# options
+options(echo=TRUE)
+options(stringsAsFactors=FALSE)
+
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("tidyverse", prompt = TRUE)
+```
+
+# Introduction
+
+```{r, out.width = "300px", echo=FALSE}
+knitr::include_graphics("./images/tidyverse.PNG")
+```
+
+# Data
+
+Data provided by Kaggle.  16k+ survey.
+
+Will start with `read.csv` to serve as an example.
+
+```{r}
+# https://www.kaggle.com/kaggle/kaggle-survey-2017#multipleChoiceResponses.csv
+multipleChoiceResponses_base <- read.csv("./data/multipleChoiceResponses.csv")
+```
+
+# Explore the Data
+
+## NAs
+
+Below `~` is the formula and the dot `.` menas all columns
+```{r}
+multipleChoiceResponses_base %>% purrr::map_df(~ sum(is.na(.)))
+```
+
+Always be cautious whn you see variables with 0 NAs - data isnever clean.  Investigate using `count` - a shortcut for a `group_by` and `summarize`
+
+```{r}
+multipleChoiceResponses_base %>% count(StudentStatus)
+```
+
+OK, now we know there are empty string - something `is.na` does not recognize!
+
+```{r}
+multipleChoiceResponses_base %>% na_if("")
+```
+
+
+View the import problems to understand how the errors arose.
+```{r}
+problems(multipleChoiceResponses_base)
+```
+
+Modify the data using the reassignment pipe `%<>%` - simple a short cut.  Requires `magrittr` - why this was not loaded with `tidyverse` I do not know.
+
+```{r}
+library(magrittr)
+multipleChoiceResponses_base %<>% na_if("")
+# multipleChoiceResponses_base <- multipleChoiceResponses_base %>% na.if("")
+```
+
+```{r}
+multipleChoiceResponses_base %>% purrr::map_df(~ sum(is.na(.)))
+```
+
+Afer transforming empty strings to `NA`, the output is more insightfull.
+
+This all could have been avoided by using `read_csv`.  Much faster.
+
+```{r}
+multipleChoiceResponses <- read_csv("./data/multipleChoiceResponses.csv")
+```
+
+Look at the problems:
+
+```{r}
+problems(multipleChoiceResponses)
+```
+`'read_csv` assumes the filed type using the first 1k of values.  Change this
+
+```{r}
+multipleChoiceResponses <- read_csv("./data/multipleChoiceResponses.csv", 
+                                    guess_max = nrow(multipleChoiceResponses))
+```
+
+No problems reported!
+
+# Examine the data
+
+```{r}
+length(names(multipleChoiceResponses))
+```
+
+Lots of columns.View with `skimr` - particularly helpful with numerical columns
+
+```{r}
+multipleChoiceResponses %>% select_if(is.numeric) %>% skimr::skim()
+```
+
+> Note the age range - unlikely someone was 100 taking the survey.  We have data issues.
+
+Helpful to know how many disticnt values for each column
+
+```{r}
+multipleChoiceResponses %>% purrr::map_df(~ n_distinct(.))
+```
+
+Hard to read.  Change it:
+
+```{r}
+multipleChoiceResponses %>% purrr::map_df(~ n_distinct(.)) %>%  
+  tidyr::gather(Question, num_distinct_answers)
+```
+
+```{r}
+multipleChoiceResponses %>% purrr::map_df(~ n_distinct(.)) %>%  
+  tidyr::gather(Question, num_distinct_answers) %>% arrange(desc(num_distinct_answers))
+```
+Sure looks like there may be too many distinct values.
+
+```{r}
+multipleChoiceResponses %>% count(WorkMethodsSelect, sort=TRUE)
+```
+
+Note there are methods separated by a comma.  There must haven been a mutiple selection method.  Want to separate them out.
+
+```{r}
+multipleChoiceResponses %>% select(WorkMethodsSelect) %>% filter(!is.na(WorkMethodsSelect)) %>% 
+  mutate(work_method = str_split(WorkMethodsSelect, ","))
+```
+
+The new column is a list of the number of commas found in each record.  Not very helpful.
+
+```{r}
+unnested_workMethods <- multipleChoiceResponses %>% select(WorkMethodsSelect) %>% filter(!is.na(WorkMethodsSelect)) %>% 
+  mutate(work_method = str_split(WorkMethodsSelect, ",")) %>% 
+  unnest(work_method) %>% 
+  select(work_method)
+unnested_workMethods
+```
+
+There are now 59k+ rows compared to 7k (after NAs were removed).
+
+There is another way to do this using `separate_rows`:
+
+```{r}
+multipleChoiceResponses %>% select(WorkMethodsSelect) %>% 
+  filter(!is.na(WorkMethodsSelect)) %>% separate_rows(WorkMethodsSelect, sep = ",")
+```
+
+> The parameter `sep=` is required to be written in the expression.
+
+# Questions
+
+What kind if questions might be asked?
+
+```{r}
+method_freq <- unnested_workMethods %>% count(work_method, sort = TRUE)
+method_freq
+```
+
+```{r}
+unnested_workMethods %>% count(work_method) %>% 
+  ggplot(aes(x = work_method, y = n)) +
+  geom_col() + coord_flip()
+```
+
+`fct_reorder` can improve the visualization.
+
+```{r}
+unnested_workMethods %>% count(work_method) %>% 
+  ggplot(aes(x = fct_reorder(work_method, n), y = n)) +
+  geom_col() + coord_flip()
+```
+
+There are many features named similarly.
+
+```{r}
+multipleChoiceResponses %>% select(contains("WorkChallengeFrequency"))
+```
+
+There are 22 features similarly named. `stringr::str_remove`
+
+```{r}
+WorkChallenges <- multipleChoiceResponses %>% select(contains("WorkChallengeFrequency")) %>% 
+  gather(Question, Response) %>%  filter(!is.na(Response)) %>% 
+  mutate(Question = stringr::str_remove(Question, "WorkChallengeFrequency"))
+WorkChallenges
+```
+
+```{r}
+WorkChallenges %>% count(Response)
+```
+
+```{r}
+WorkChallenges %>% 
+  mutate(Response = if_else(Response %in% c("Most of the time", "Often"), 1, 0))
+```
+
+```{r}
+perc_problem_work_challenge <- WorkChallenges %>% 
+  mutate(Response = if_else(Response %in% c("Most of the time", "Often"), 1, 0)) %>% 
+  group_by(Question) %>% summarise(perc_problem = mean(Response))
+perc_problem_work_challenge
+```
+
+```{r}
+ggplot(perc_problem_work_challenge, aes(x = fct_reorder(Question, perc_problem), y = perc_problem)) + 
+  geom_point() + coord_flip() + scale_y_continuous(labels = scales::percent) +
+  labs(x = "Question", y = "Percent Encountering Challenge Frequently")
+```
+
+
+

@@ -41,7 +41,7 @@ library(easypackages)
 packages("tidyverse", "ggthemes", prompt = TRUE)
 options(digits = 3)
 
-setwd("~/R/DataJourney/Robby_Mortgage") #change as needed
+setwd("~/GitHub/MachineLearning/EDA") #change as needed
 ```
 
 # Introduction
@@ -53,13 +53,8 @@ This document simply evaluates the capabilities of a variety of R EDA packages. 
 Will use data provided by Robbie used the the mortgage lead score prediction algorithm.
 
 ```{r getData, message=FALSE}
-combined_data <- read_csv("00_data/combined-data.csv")
-
-#Remove columns not needed
-myData <- combined_data %>% dplyr::select(-c(contains("phone")))
-
-myData <- myData %>% dplyr::select(-c("leadid", "eventually_apply", "application_dt", "funded_dt",
-                               "dialed_number", "start_date_time"))
+library(funModeling)
+myData <- heart_disease
 glimpse(myData)
 ```
 
@@ -104,6 +99,7 @@ The following R Packages are introduced:
 - PerformanceAnalytics
 - descriptr
 - inspectdf
+- exploreR
 
 Also included:
 
@@ -262,7 +258,7 @@ detach("package:SmartEDA", unload=TRUE)
 
 ## funModeling
 
-This package provides more functionality than illustrated below.  An example of this - gain and lift charts!  For these reasons, I suggest `funModleing` be part of your daily toolset.
+This package provides more functionality than illustrated below.  An example of this - gain and lift charts!  For these reasons, I suggest `funModeling` be part of your daily toolset.
 
 Note; Below I occasionally used a different data set to illustrate all the features more effectively.
 
@@ -303,7 +299,60 @@ cross_plot(data=heart_disease, target="has_heart_disease", input=vars_to_analyze
 detach("package:funModeling", unload=TRUE)
 ```
 
-Overall impression - best overall EDA package with functionality beyond EDA.
+### New Features
+
+`funModeling` introduces two functions — `discretize_get_bins` & `discretize_df` — that work together in order to help us in the discretization task.
+
+Two variables will be discretized in the following example: `max_heart_rate` and `oldpeak.` Also introduce some `NA` values
+into `oldpeak` to test how the function works with missing data.
+
+```{r}
+myData$oldpeak[1:30]=NA
+```
+
+__Step 1__: Getting the bin thresholds for each input variable:
+
+`discretize_get_bins` returns a data frame that needs to be used in the`discretize_df` function, which returns the final processed data frame.
+
+Parameters:
+
+- __data__: the data frame containing the variables to be processed.
+- __input__: vector of strings containing the variable names.
+- __n_bins__: the number of bins/segments to have in the discretized data.
+
+```{r}
+d_bins=discretize_get_bins(data=myData, input=c("max_heart_rate", "oldpeak"), n_bins=5)
+d_bins
+```
+
+__Step 2__: Applying the thresholds for each variable:
+
+Parameters:
+
+- __data__: data frame containing the numerical variables to be discretized.
+- __data_bins__: data frame returned by discretize_get_bins. If it is changed by the user, then each upper boundary must be separated by a pipe character (`|`) as shown in the example.
+- __stringsAsFactors__: TRUE by default, final variables will be factor (instead of a character) and useful when plotting.
+
+```{r}
+myData_discretized = discretize_df(data = myData, data_bins = d_bins, stringsAsFactors = T)
+describe(myData_discretized %>% select(max_heart_rate, oldpeak))
+```
+
+```{r}
+p5 = ggplot(myData_discretized, aes(max_heart_rate)) + 
+    geom_bar(fill = "#0072B2") + theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+    
+p6 = ggplot(myData_discretized, aes(oldpeak)) + 
+    geom_bar(fill = "#CC79A7") + theme_bw() + theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1))
+
+gridExtra::grid.arrange(p5, p6, ncol=2)
+```
+
+The data frame returned by `discretize_get_bins` must be saved in order to apply it to new data. If the discretization is not intended to run with new data, then there is no sense in having two functions: it can be only one. In addition, there would be no need to save the results of `discretize_get_bins.`  __Having a two-step approach, both can be handeled.__
+
+The easiest way to discretize a data frame is to select the same number of bins to apply to every variable, however, if tuning is needed, then some variables may need a different number of bins. For example, a variable with less dispersion can work well with a low number of bins. Common values for the number of segments could be 3, 5, 10, or 20 (but no more). It is up to the data scientist to make this decision.
+
+Overall impression - best overall EDA package with functionality beyond EDA.  `funModeling` and `recipes` is likely the thest combination of packages.
 
 ## rpivotTable
 
@@ -578,6 +627,41 @@ allGrades %>% inspect_cor(with_col = "ScreenTime") %>% show_plot()
 ## Overall Impression
 
 I like this package because it's got a lot of functionality and it's incredibly straightforward. In short it allows you to understand and visualize column types, sizes, values, value imbalance & distributions as well as correlations.  Further to this, it allows you to very easily perform any of the above features for an individual data frame, or to compare the differences between two data frames. 
+
+# exploreR
+
+Simple tools and features that can be used often.  Only a few functions but they are often useful.
+
+`reset` completely resets the workspace without restarting r. It does this by wiping the console and clearing the global environment. But it also unloads from your namespace all your loaded packages except those included by default and this package, simpletools.
+
+```{r message=FALSE}
+library(exploreR)
+# reset()
+```
+
+`masslm` quickly produces a linear model of the Dependent Variable and any other variable in the dataset, it then extracts those features of the linear model that are typically the most useful and then returns a data frame containing the results.
+
+```{r}
+regressResults <- masslm(iris, "Sepal.Length", ignore = "Species")
+regressResults
+```
+
+```{r}
+massregplot(iris, "Sepal.Length", ignore = "Species")
+```
+
+`standardize` converts variables and makes them more easier to compare to other variables, especially those different in scale.
+
+With standardize, there are two types of processes. The _absolute_ method involves converting every variable to a scale from 0 to 1. When these results are regressed, the coefficients represent the absolute change in the dependent variable as a result of the standardized dependant variable. The _classic_ method revalues each observation to give the variable a mean of 0 and standard deviation of 1.
+
+```{r}
+stand.Petals <- standardize(iris, c("Petal.Width", "Petal.Length"))
+head(stand.Petals)
+```
+
+## Overall Impression
+
+While useful, uncertain if there is enough functionality to remeber to load another library.
 
 # Miscellaneous Code
 

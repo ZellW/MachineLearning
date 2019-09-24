@@ -1,0 +1,150 @@
+---
+title: "H2O AutoML Binary Classification Demo"
+output:
+  prettydoc::html_pretty:
+    theme: Architect
+    highlight: github
+---
+
+## Start H2O
+
+Load the h~2~o R library.
+
+```{r message=FALSE, warning=FALSE}
+setwd("~/R/Complete")
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("plyr", "dplyr", "tidyr","tibble", "ggplot2", "tictoc", "h2o", prompt = TRUE)
+```
+
+Start h~2~o and initialize a local h~2~o cluster.
+
+```{r}
+Sys.unsetenv("http_proxy")  # only needed at Ally
+Sys.unsetenv("https_proxy") # only needed at Ally
+
+tic()
+h2o.init()
+h2o.no_progress()  # Turn off progress bars for notebook readability
+toc()
+```
+
+### Explore the h~2~o UI
+
+h~2~o creates its own UI that you can use for machine learning.  It is perfectly useful and you may find it helpful.  (I prefer simply prefer doing the sames tasks using R.)
+
+http://localhost:54321/flow/index.html 
+
+```{r out.width= "60%"}
+knitr::include_graphics("../images/h2o_UI.PNG")
+```
+
+## Load Data
+
+For the AutoML binary classification demo, we use a subset of the [Product Backorders](https://www.kaggle.com/tiredgeek/predict-bo-trial/data) dataset.  The goal here is to predict whether or not a product will be put on backorder status, given a number of product metrics such as current inventory, transit time, demand forecasts and prior sales.
+
+```{r}
+df <- read.csv("../data/h20_orders_example.csv")
+```
+
+```{r}
+df_split <- h2o.splitFrame(data = as.h2o(df), ratios=0.80)
+df_train <-  df_split[[1]]
+df_test <- df_split[[2]]
+```
+
+For classification, the response should be encoded as a factor.
+
+```{r}
+df_train
+```
+
+Notice the response column `went_on_backorder`, is already encoded as *enum*, so there's nothing we need to do here.  If it were encoded as a 0/1 `int`, then we'd have to convert the column as as a factor.
+
+Next identify the response & predictor columns by saving them as `x` and `y`.  The `"sku"` column is a unique identifier so remove it  from the set of our predictors.
+
+```{r}
+y <- "went_on_backorder"
+x <- setdiff(names(df_train), c(y, "sku"))
+```
+
+## Run AutoML 
+
+Run AutoML, stopping after 10 models.  The `max_models` argument specifies the number of individual models.  It does not include the two ensemble models that are trained at the end.
+
+```{r}
+tic()
+myAutoML <- h2o.automl(y = y, x = x, training_frame = df_train, max_models = 10, seed = 1)
+toc()
+```
+
+## Leaderboard
+
+View the **AutoML Leaderboard**.  By default, the AutoML leaderboard uses cross-validation metrics to rank the models.  
+
+A default performance metric for each machine learning task (binary classification, multiclass classification, regression) is specified internally and the leaderboard will be sorted by that metric.  In the case of binary classification, the default ranking metric is *Area Under the ROC Curve* (AUC).  
+
+The leader model is stored at `myAutoML@leader` and the leaderboard is stored at `myAutoML@leaderboard`.
+
+```{r}
+myLeaderboard <- myAutoML@leaderboard
+myLeaderboard
+```
+
+There are two Stacked Ensembles near the top of the leaderboard.  Stacked Ensembles can almost always outperform a single model.
+
+## Ensemble Exploration
+
+To understand how the ensemble works, look inside the Stacked Ensemble.  *All Models* is an ensemble of all of the individual models in the AutoML run.  This is often the top performing model on the leaderboard.
+
+```{r}
+# Get model ids for all models in the AutoML Leaderboard
+model_ids <- as.data.frame(myAutoML@leaderboard$model_id)[,1]
+model_ids
+```
+
+```{r}
+# Get the "All Models" Stacked Ensemble model
+se <- h2o.getModel(grep("StackedEnsemble_AllModels", model_ids, value = TRUE)[1])
+# Get the Stacked Ensemble metalearner model
+mySEs <- h2o.getModel(se@model$metalearner$name)
+```
+
+Below shows how much each learner is contributing to the ensemble; one view is a table and the other is a plot.. 
+
+```{r}
+h2o.varimp(mySEs)
+```
+
+```{r}
+h2o.varimp_plot(mySEs)
+```
+
+It is clear XRT_0_AutoML_20181024_120749, DRF_0_AutoML_20181024_120749, and GBM_grid_0_AutoML_20181024_120749_model_3 are the leading models in the ensemble that contribute to the performance.
+
+##Predictions
+
+```{r}
+myPredictions <- h2o.predict(myAutoML, df_test)
+head(myPredictions, 15)
+#myPredictions2 <- myPredictions %>% as_tibble() %>% add_column(Actual_Predict=as.tibble(df_test)$went_on_backorder)
+#table(myPredictions2$predict, myPredictions2$Actual_Predict)
+```
+
+## Save Leader Model
+
+There are two ways to save the leader model -- binary format and MOJO format.  If you're taking your leader model to production, then we'd suggest the MOJO format since it's optimized for production use.
+
+> MOJO = Maven Old Java Object;  POJO = Plain Old Java Object
+
+```{r eval=FALSE}
+h2o.saveModel(myAutoML@leader, path = "./product_backorders_model_bin")
+```
+
+```{r eval=FALSE}
+h2o.download_mojo(myAutoML@leader, path = "./")
+```
+
+```{r results='hide'}
+h2o.shutdown(prompt = FALSE)
+```
