@@ -1,0 +1,169 @@
+---
+title: "vTreat Model Data Preparation"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+setwd("C:/R")
+```
+
+```{r message=FALSE}
+library(rqdatatable)
+## Loading required package: rquery
+library(vtreat)
+suppressPackageStartupMessages(library(ggplot2))
+library(WVPlots)
+library(dplyr)
+```
+
+# Introduction
+
+The purpose of vtreat library is to reliably prepare data for supervised machine learning. The library is designed to produce a data.frame that is entirely numeric and takes common precautions to guard against the following real world data issues:
+
+- Categorical variables with very many levels.
+  - Re-encode such variables as a family of indicator or dummy variables for common levels plus an additional impact code (also called “effects coded”). This allows principled use (including smoothing) of huge categorical variables (like zip-codes) when building models. This is critical for some libraries (such as randomForest, which has hard limits on the number of allowed levels).
+- Rare categorical levels.
+  - Levels that do not occur often during training tend not to have reliable effect estimates and contribute to over-fit. vtreat helps with 2 precautions in this case. First the rareLevel argument suppresses levels with this count our below from modeling, except possibly through a grouped contribution. Also with enough data vtreat attempts to estimate out of sample performance of derived variables. Finally we suggest users reserve a portion of data for vtreat design, separate from any data used in additional training, calibration, or testing.
+- Novel categorical levels.
+  - A common problem in deploying a classifier to production is: new levels (levels not seen during training) encountered during model application. We deal with this by encoding categorical variables in a possibly redundant manner: reserving a dummy variable for all levels (not the more common all but a reference level scheme). This is in fact the correct representation for regularized modeling techniques and lets us code novel levels as all dummies simultaneously zero (which is a reasonable thing to try). This encoding while limited is cheaper than the fully Bayesian solution of computing a weighted sum over previously seen levels during model application.
+- Missing/invalid values NA, NaN, +-Inf.
+  - Variables with these issues are re-coded as two columns. The first column is clean copy of the variable (with missing/invalid values replaced with either zero or the grand mean, depending on the user chose of the scale parameter). The second column is a dummy or indicator that marks if the replacement has been performed. This is simpler than imputation of missing values, and allows the downstream model to attempt to use missingness as a useful signal (which it often is in industrial data).
+- Extreme values.
+  - Variables can be restricted to stay in ranges seen during training. This can defend against some run-away classifier issues during model application.
+- Constant and near-constant variables.
+  - Variables that “don’t vary” or “nearly don’t vary” are suppressed.
+- Need for estimated single-variable model effect sizes and significances.
+  - It is a dirty secret that even popular machine learning techniques need some variable pruning (when exposed to very wide data frames, see here and here). We make the necessary effect size estimates and significances easily available and supply initial variable pruning.
+
+The above are all awful things that often lurk in real world data. Automating these steps ensures they are easy enough that you actually perform them and leaves the analyst time to look for additional data issues. The idea is: data.frames prepared with the vtreat library are somewhat safe to train on as some precaution has been taken against all of the above issues. Also of interest are the vtreat variable significances (help in initial variable pruning, a necessity when there are a large number of columns) and vtreat::prepare(scale=TRUE) which re-encodes all variables into effect units making them suitable for y-aware dimension reduction (variable clustering, or principal component analysis) and for geometry sensitive machine learning techniques (k-means, knn, linear SVM, and more). You may want to do more than the vtreat library does (such as Bayesian imputation, variable clustering, and more) but you certainly do not want to do less.
+
+See https://github.com/WinVector/vtreat
+
+# Data
+
+- y is a noisy sinusoidal function of the variable x
+- yc is the output to be predicted: whether y is > 0.5.
+- Input xc is a categorical variable that represents a discretization of y, along some NAs
+- Input x2 is a pure noise variable with no relationship to the output
+
+```{r}
+make_data <- function(nrows) {
+    d <- data.frame(x = 5*rnorm(nrows))
+    d['y'] = sin(d['x']) + 0.1*rnorm(n = nrows)
+    d[4:10, 'x'] = NA                  # introduce NAs
+    d['xc'] = paste0('level_', 5*round(d$y/5, 1))
+    d['x2'] = rnorm(n = nrows)
+    d[d['xc']=='level_-1', 'xc'] = NA  # introduce a NA level
+    d['yc'] = d[['y']]>0.5
+    return(d)
+}
+
+d = make_data(500)
+
+head(d, 15)
+```
+
+# vTreat Transform
+
+Goal is to make all the input variables are numeric and have no missing values or NAs.
+
+First create the data treatment transform design object, in this case a treatment for a binomial classification problem.
+
+- mkCrossFrameCExperiment: Run categorical cross-frame experiment. Builds a designTreatmentsC that  builds all treatments for a data frame to predict a categorical outcome.
+- mkCrossFrameMExperiment: Function to build multi-outcome vtreat cross frame and treatment plan. Intended for multi-class classification or multinomial modeling
+- mkCrossFrameNExperiment builds all treatments for a data frame to predict a numeric outcome
+
+```{r}
+transform_design = vtreat::mkCrossFrameCExperiment(
+    dframe = d,                                    # data to learn transform from
+    varlist = setdiff(colnames(d), c('y', 'yc')),  # columns to transform
+    outcomename = 'yc',                            # outcome variable
+    outcometarget = TRUE)                           # outcome of interest
+```
+
+```{r}
+transform <- transform_design$treatments
+d_prepared <- transform_design$crossFrame
+score_frame <- transform$scoreFrame
+score_frame$recommended <- score_frame$varMoves & (score_frame$sig < 1/nrow(score_frame))
+```
+
+> transform_design$crossFrame is not the same as transform.prepare(d); the second call can lead to nested model bias in some situations, and is not recommended. For other, later data, not seen during transform design transform.preprare(o) is an appropriate step.
+
+Now examine the score frame, which gives information about each new variable, including its type, which original variable it is derived from, its (cross-validated) correlation with the outcome, and its (cross-validated) significance as a one-variable linear model for the outcome.
+
+```{r}
+glimpse(score_frame)
+```
+
+Note that the variable `xc` has been converted to multiple variables:
+
+- an indicator variable for each possible level (`xc_lev_*`)
+- the value of a (cross-validated) one-variable model for `yc` as a function of `xc` (`xc_catB`)
+- a variable that returns how prevalent this particular value of `xc` is in the training data (`xc_catP`)
+- a variable indicating when `xc` was `N`A in the original data (`xc_lev_NA` for categorical variables, `x_isBAD` for continuous variables).
+
+Any or all of these new variables are available for downstream modeling.
+
+The recommended column indicates which variables are non constant (`varMoves` == TRUE) and have a significance value smaller than $1/nrow(score_frame)$. Recommended columns are intended as advice about which variables appear to be most likely to be useful in a downstream model. This advice attempts to be conservative, to reduce the possibility of mistakenly eliminating variables that may in fact be useful (although, obviously, it can still mistakenly eliminate variables that have a real but non-linear relationship to the output, as is the case with `x`, in our example).
+
+Look at the variables that are and are not recommended:
+
+```{r}
+# recommended variables
+score_frame %>% filter(recommended == "TRUE") %>% select(varName)
+```
+
+```{r}
+# not recommended variables
+score_frame %>% filter(recommended == "FALSE") %>% select(varName)
+```
+
+Notice that `d_prepared` only includes derived variables and the outcome `y`:
+
+```{r}
+glimpse(d_prepared)
+```
+
+# Using Prepared Data in a Model
+
+The goal is use the prepared data in a model (using only the recommended variables).
+
+```{r}
+model = glm(yc ~ ., data = d_prepared)
+
+# now predict
+d_prepared <- d_prepared %>% mutate(prediction = predict(model, newdata = d_prepared))
+```
+
+```{r}
+# look at the ROC curve (on the training data)
+WVPlots::ROCPlot(frame = d_prepared, xvar = 'prediction', truthVar = 'yc', truthTarget = TRUE,
+                 title = 'Performance of logistic regression model on training data')
+```
+
+## Apply the model to new data
+
+```{r}
+# create the new data
+dtest <- make_data(450)
+
+# prepare the new data with vtreat
+dtest_prepared = prepare(transform, dtest)
+
+# apply the model to the prepared data
+dtest_prepared <- dtest_prepared %>% mutate(prediction = predict(model, newdata = dtest_prepared))
+```
+
+```{r}
+WVPlots::ROCPlot(frame = dtest_prepared, xvar = 'prediction', truthVar = 'yc', truthTarget = TRUE,
+                 title = 'Performance of logistic regression model on test data')
+```
+
+# Reference
+
+https://github.com/WinVector/vtreat/blob/master/Examples/Classification/Classification.md
+http://winvector.github.io/DataPrep/EN-CNTNT-Whitepaper-Data-Prep-Using-R.pdf
