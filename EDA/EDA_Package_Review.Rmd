@@ -712,6 +712,33 @@ head(stand.Petals)
 
 While useful, uncertain if there is enough functionality to remeber to load another library.
 
+# ExPanDaR
+
+The `ExPanDaR` package offers a toolbox for interactive exploratory data analysis (EDA).
+
+The new `ExPanDaR` version contains an option to export data and code as a notebook so that you can take your exploratory data analysis to the next level. All it takes is one additional parameter so that you do not accidentally share your data with the world in case you are publicly hosting your shiny app:
+
+`ExPanD(mtcars, export_nb_option = TRUE)`
+
+After clicking the button a download dialog will let you store a zip file. The zip file contains two files
+
+- A notebook file `ExPanD_nb_code.Rmd`
+- A data file `ExPanD_nb_data.RData` holding the data and variable definitions
+
+Unzip the file and load the notebook file in R Studio. It contains the code to prepare all tables and visuals that are displayed by the ‘ExPanD’ app. When sourcing it to an HTML file you should see them rendered as expected.
+
+```{r}
+# devtools::install_github("joachim-gassen/ExPanDaR")
+library(ExPanDaR)
+ExPanD(mtcars)
+```
+
+Explore a Shiny version [here](https://jgassen.shinyapps.io/expand_fuel_economy/)
+
+## Overall Impression
+
+A quick way to review data.  Worth keeping in the EDA toolbelt.
+
 # Miscellaneous Code
 
 ## # NULL to NA
@@ -738,7 +765,8 @@ categorical_columns <- colnames(dataset[, sapply(dataset, is.character)])
 ## Potential ID Columns
 ```{r eval=FALSE}
 ## Parse column name to look for ID to suggest ID columns
-myIDs <- filter(df_status(dataset), grepl("id", variable, ignore.case = TRUE)) %>% select(variable, type, unique)
+myIDs <- filter(df_status(dataset), grepl("id", variable, ignore.case = TRUE)) %>%
+     select(variable, type, unique)
 myIDs[,1]
 # ID variables rarely useful in algorithm development.  Consider removing from dataset.
 if(nrow(myIDs) > 0){dataset <- dataset %>% select(-contains("id"))}
@@ -748,8 +776,12 @@ if(nrow(myIDs) > 0){dataset <- dataset %>% select(-contains("id"))}
 ```{r eval=FALSE}
 # Adjust number in filter to change unique count cutoff limit
 ## Identify columns to be converted to factors
-temp <- dataset[colnames(dataset[,sapply(dataset,is.character)])] %>% summarise_all(funs(n_distinct(.)))
-factor_columns <- melt(as.data.frame(temp)) %>% filter(value <= 15) %>% select(variable) %>% .[["variable"]] %>% as.character()
+temp <- dataset[colnames(dataset[, sapply(dataset, is.character)])] %>%
+     summarise_all(funs(n_distinct(.)))
+
+factor_columns <- melt(as.data.frame(temp)) %>% filter(value <= 15) %>% 
+     select(variable) %>% .[["variable"]] %>% as.character()
+
 ## Convert columns to factors if less than 15 unique values
 dataset[factor_columns] <- lapply(dataset[factor_columns], factor)
 rm(temp)
@@ -766,6 +798,77 @@ plot_missing(dataset)
 
 # Drop specific columns with missing data
 dataset <- dataset[ , !(names(dataset) %in% c("Column1", "Column2"))]
+```
+
+### Missing Data with ggplot
+
+https://jenslaufer.com/data/analysis/visualize_missing_values_with_ggplot.html
+
+```{r}
+myData <- funModeling::heart_disease
+missing.values <- myData %>%
+    gather(key = "key", value = "val") %>%
+    mutate(is.missing = is.na(val)) %>%
+    group_by(key, is.missing) %>%
+    summarise(num.missing = n()) %>%
+    filter(is.missing==T) %>%
+    select(-is.missing) %>%
+    arrange(desc(num.missing)) 
+```
+
+```{r}
+missing.values %>%
+  ggplot() +
+    geom_bar(aes(x=key, y=num.missing), stat = 'identity') +
+    labs(x='variable', y="number of missing values", title='Number of missing values') +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+missing.values <- myData %>%
+  gather(key = "key", value = "val") %>%
+  mutate(isna = is.na(val)) %>%
+  group_by(key) %>%
+  mutate(total = n()) %>%
+  group_by(key, total, isna) %>%
+  summarise(num.isna = n()) %>%
+  mutate(pct = num.isna / total * 100)
+
+
+levels <-
+    (missing.values  %>% filter(isna == T) %>% arrange(desc(pct)))$key
+
+percentage.plot <- missing.values %>%
+      ggplot() +
+        geom_bar(aes(x = reorder(key, desc(pct)), 
+                     y = pct, fill=isna), 
+                 stat = 'identity', alpha=0.8) +
+      scale_x_discrete(limits = levels) +
+      scale_fill_manual(name = "", 
+                        values = c('steelblue', 'tomato3'), labels = c("Present", "Missing")) +
+      coord_flip() +
+      labs(title = "Percentage of missing values", x =
+             'Variable', y = "% of missing values")
+
+percentage.plot
+```
+
+```{r}
+row.plot <- myData %>%
+  mutate(id = row_number()) %>%
+  gather(-id, key = "key", value = "val") %>%
+  mutate(isna = is.na(val)) %>%
+  ggplot(aes(key, id, fill = isna)) +
+    geom_raster(alpha=0.8) +
+    scale_fill_manual(name = "",
+        values = c('steelblue', 'tomato3'),
+        labels = c("Present", "Missing")) +
+    scale_x_discrete(limits = levels) +
+    labs(x = "Variable",
+           y = "Row Number", title = "Missing values in rows") +
+    coord_flip()
+
+row.plot
 ```
 
 ## Imputed Data
