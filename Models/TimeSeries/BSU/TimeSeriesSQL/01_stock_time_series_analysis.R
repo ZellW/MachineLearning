@@ -2,6 +2,7 @@
 # Stocks & Fannie Mae Mortgage Delinquency Analysis 
 # PART 1: STOCK ANALYSIS - SQL TIME SERIES TRAINING ----
 # 
+setwd("~/GitHub/MachineLearning/Models/TimeSeries/BSU/TimeSeriesSQL")
 # Logic:  3 consecutive missed payments = failure => 3 month rolling aver => 3 is failure
 # 
 # 4 types of time series operation here:  rolling windows, lags & diffs, Pct Change & Growth, Time Aggregations
@@ -28,8 +29,6 @@ library(RSQLite)
 library(connections) # remotes::install_github("edgararuiz/connections")
 # lets you visualize the connection in the connections tab in RStudio - productivy improvement
 # Try seeing the data in the conections RStudio tab witohut doing tbl(con_stocks, "stock_history")
-
-setwd("~/GitHub/MachineLearning/Models/TimeSeries/BSU/TimeSeriesSQL")
 
 #con_stocks <- connection_open(drv = SQLite(), dbname = "stocks.sqlite")
 con_stocks <- connections::connection_open(drv = SQLite(), dbname = "d:/LargeData/BSUSQL/lab_22_sql_advanced - llpro/stocks.sqlite")
@@ -108,15 +107,12 @@ ggplotly(g)
 rolling_window_query <- tbl(con_stocks, "stock_history") %>%
     
     select(symbol, date, adjusted) %>%
-    
     group_by(symbol) %>%
     
     window_frame(from = -90, to = 0) %>%  # 90 day moving average.  There is no visible change to the data. dbplyr function
     window_order(date) %>%
     
-    mutate(roll_avg = mean(adjusted, na.rm = TRUE))  %>%
-    
-    ungroup()
+    mutate(roll_avg = mean(adjusted, na.rm = TRUE)) %>%   ungroup()
 
 rolling_window_query %>% show_query()
 

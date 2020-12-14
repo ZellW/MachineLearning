@@ -1,0 +1,159 @@
+---
+title: "textplot - Visualization of Text by bnosac"
+output:
+  rmdformats::readthedown:
+    highlight: pygments
+    code_folding: hide
+---
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+if(!require(easypackages)){install.packages("easypackages")}
+library(easypackages)
+packages("udpipe", "textplot", "ggraph", "BTM", "concaveman", "Rgrapghviz", "qgraph", "glasso", prompt = FALSE)
+
+# BTM - Biterm topic models for short text
+# concaveman - Fast 2D Concave Hull Algorithm
+## Algorithms that construct convex hulls of various objects have a broad range of applications in mathematics and computer science.
+## In computational geometry, numerous algorithms are proposed for computing the convex hull of a finite set of points, 
+## with various computational complexities.
+
+setwd("~/Documents/GitHub/MachineLearning/Models/NLP_TextMining")
+```
+
+```{r installGraph, eval=FALSE}
+# http://www.bioconductor.org/packages/release/bioc/html/graph.html
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+
+BiocManager::install("graph")
+BiocManager::install("Rgraphviz")
+```
+
+```{r message=FALSE, warning=FALSE}
+library(graph)
+library(Rgraphviz)
+```
+
+# Introduction
+
+The `texplot` R package allows one to visualise complex relations in texts. This is done by providing functionalities for displaying text co-occurrence networks, text correlation networks, dependency relationships as well as text clustering.
+
+`textplot` allows visualizations including:
+
+- Text frequencies
+- Text correlations
+- Text cooccurrences
+- Text clusters
+- Dependency parsing results
+
+# Example visualisations
+
+## Dependency Parser
+
+### Example 1
+
+```{r eval=FALSE}
+model <- udpipe_download_model(language = "english", model_dir = "data/")
+udmodel_english <- udpipe_load_model(file = "data/english-ewt-ud-2.4-190531.udpipe")
+```
+```{r}
+x <- udpipe("His speech about marshmallows in New York is utter bullshit", "english")
+plt <- textplot_dependencyparser(x, size = 4)
+plt
+```
+
+### Example 2
+
+```{r}
+x <- udpipe("UDPipe provides tokenization, tagging, lemmatization and dependency parsing of raw text", "english")
+plt <- textplot_dependencyparser(x, size = 4)
+plt
+```
+
+## Biterm Topic Model plots
+
+### Example 1
+
+```{r}
+data(example_btm, package = 'textplot')
+model <- example_btm
+plt <- plot(model, title = "BTM model", top_n = 5)
+plt
+```
+
+```{r}
+plt <- plot(model, title = "Biterm topic model", subtitle = "Topics 2 to 8", which = 2:8, top_n = 7)
+plt
+```
+
+### Example 2
+
+```{r message=FALSE, warning=FALSE}
+library(data.table)
+
+## Annotate text with parts of speech tags
+data("brussels_reviews", package = "udpipe")
+anno <- subset(brussels_reviews, language %in% "nl")
+anno <- data.frame(doc_id = anno$id, text = anno$feedback, stringsAsFactors = FALSE)
+anno <- udpipe(anno, "dutch")
+## Get cooccurrences of nouns / adjectives and proper nouns
+biterms <- as.data.table(anno)
+biterms <- biterms[, cooccurrence(x = lemma, relevant = upos %in% c("NOUN", "PROPN", "ADJ"), skipgram = 2), by = list(doc_id)]
+## Build the BTM model
+set.seed(123456)
+x <- subset(anno, upos %in% c("NOUN", "PROPN", "ADJ"))
+x <- x[, c("doc_id", "lemma")]
+model <- BTM(x, k = 5, beta = 0.01, iter = 2000, background = TRUE,
+biterms = biterms, trace = 100)
+plt <- plot(model)
+plt
+```
+
+## Bar plots
+
+Example showing frequency of adjectives.
+
+```{r}
+data("brussels_reviews_anno", package = "udpipe")
+x <- subset(brussels_reviews_anno, xpos %in% "JJ")
+x <- sort(table(x$lemma))
+plt <- textplot_bar(x, top = 20, panel = "Adjectives", xlab = "Frequency", col.panel = "lightblue", 
+                    cextext = 0.75, addpct = TRUE, cexpct = 0.5)
+plt
+```
+
+## Correlation of texts
+
+Top correlations above a certain threshold
+
+```{r}
+dtm <- subset(anno, upos %in% "ADJ")
+dtm <- document_term_frequencies(dtm, document = "doc_id", term = "lemma")
+dtm <- document_term_matrix(dtm)
+dtm <- dtm_remove_lowfreq(dtm, minfreq = 5)
+textplot_correlation_lines(dtm, top_n = 25, threshold = 0.01, lwd = 5, label = TRUE)
+```
+
+Correlations which are non-zero after fitting a glasso model.
+
+```{r}
+dtm <- subset(anno, upos %in% "NOUN")
+dtm <- document_term_frequencies(dtm, document = "doc_id", term = "token")
+dtm <- document_term_matrix(dtm)
+dtm <- dtm_remove_lowfreq(dtm, minfreq = 20)
+dtm <- dtm_remove_tfidf(dtm, top = 100)
+term_correlations <- dtm_cor(dtm)
+textplot_correlation_glasso(term_correlations, exclude_zero = TRUE)
+```
+
+## Co-occurrence of texts
+
+Example showing adjectives occurring in the same document.
+
+```{r}
+data(brussels_reviews_anno, package = 'udpipe')
+x <- subset(brussels_reviews_anno, xpos %in% "JJ" & language %in% "fr")
+x <- cooccurrence(x, group = "doc_id", term = "lemma")
+plt <- textplot_cooccurrence(x, title = "Adjective co-occurrences", top_n = 25)
+plt
+```
+

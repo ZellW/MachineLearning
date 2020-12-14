@@ -28,7 +28,9 @@ acquisitions_query %>% glimpse()
 performance_query <- tbl(con_fannie, "performance")
 performance_query %>% glimpse()
 
-c("# tic()", "# performance_query %>% count()", "# toc()")
+tic()
+performance_query %>% count()
+toc()  # takes 74 seconds to return 45,053,504
 
 # 2.0 EDA - Inspecting Loan Delinquency ----
 
@@ -91,16 +93,16 @@ plot_delinquency <- function(loan_ID) {
 
 
 # 2.1 Good Customer: Almost Perfect Repayment History ----
-plot_upb(loan_ID = loan_ids_delinquent[1])
-plot_delinquency(loan_ids_delinquent[1])
+plot_upb(loan_ID = loan_ids_delinquent[10])
+plot_delinquency(loan_ids_delinquent[10]) # only missed 1 payment
 
 # 2.2 OK Customer: Falls Behind But Able to Manage ----
-plot_upb(loan_ID = loan_ids_delinquent[10])
-plot_delinquency(loan_ids_delinquent[10])
+plot_upb(loan_ID = loan_ids_delinquent[1])
+plot_delinquency(loan_ids_delinquent[1])#fell behind 1 payment for last 2 months
 
-# 2.3 Bad Customer: Probably Never Intended to Pay ----
-plot_upb(loan_ids_delinquent[2])
-plot_delinquency(loan_ids_delinquent[2])
+# 2.3 Bad Customer: lots of missed payments ----
+plot_upb(loan_ids_delinquent[15])
+plot_delinquency(loan_ids_delinquent[15])
 
 
 # 3.0 ROLLING WINDOW FUNCTIONS ----

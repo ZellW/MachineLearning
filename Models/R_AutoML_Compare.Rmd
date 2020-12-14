@@ -7,7 +7,7 @@ output:
 ---
 
 ```{r echo=FALSE, warning=TRUE, message=TRUE}
-setwd("~/R/WIP") #change as needed
+#setwd("~/R/WIP") #change as needed
 
 # options
 options(echo=TRUE)
@@ -15,13 +15,31 @@ options(stringsAsFactors=FALSE)
 
 if(!require(easypackages)){install.packages("easypackages")}
 library(easypackages)
-packages("dplyr", "SuperLearner",  "MachineShop", "recipes", "MASS", prompt = TRUE)
+packages("dplyr", "MASS", "rsample", prompt = TRUE)
 ```
+
+# Introduction
+
+In last few years, AutoML or automated machine learning as become widely popular among data science community. Big tech giants like Google, Amazon and Microsoft have started offering AutoML tools. There is still a split among data scientists when it comes to AutoML. Some fear that it is going to be a threat to their jobs and others believe that there is a bigger risk than a job; might cost the company itself. Others see it as a tool that they could use for non-critical tasks or for presenting proof-of-concepts. In-arguably, it has definitely made its mark among the data science community.
+
+According to wikipedia _Automated machine learning (AutoML) is the process of automating the process of applying machine learning to real-world problems. AutoML covers the complete pipeline from the raw dataset to the deployable machine learning model_
+
+__Pro’s__
+
+- Time saving: It’s a quick and dirty prototyping tool. If you are not working on critical task, you could use AutoML to do the job for you while you focus on more critical tasks.
+- Benchmarking: Building an ML/DL model is fun. But, how do you know the model you have is the best? You either have to spend a lot of time in building iterative models or ask your colleague to build one and compare it. The other option is to use AutoML to benchmark yours.
+
+__Con’s__
+
+- Most AI models that we come across are black box. Similar is the case with these AutoML frameworks. If you don’t understand what you are doing, it could be catastrophic.
+- Based on my previous point, AutoML is being marketed as a tool for non-data scientists. This is a bad move. Without understanding how a model works and blindly using it for making decisions could be disastrous.
+Personally, I do use AutoML frameworks for day-to-day tasks. It helps me save time and understand the techniques and tuning parameters behind these frameworks.
 
 # Data
 
 ```{r}
-glimpse(Boston)
+boston <- Boston
+glimpse(boston)
 ```
 
 - crim - per capita crime rate by town. 
@@ -41,7 +59,170 @@ glimpse(Boston)
 
 > Solve for medv
 
+```{r}
+boston_split <- boston %>% initial_split()
+boston_train <- training(boston_split)
+boston_test <- testing(boston_split)
+```
+
 # R Packages
+
+## H2O
+
+See http://docs.h2o.ai/h2o-tutorials/latest-stable/h2o-world-2017/automl/R/automl_regression_powerplant_output.Rmd
+
+There are two options:  Run a train/test split or use 100% of the data and let H2O use cross-validated metrics.  This is the preferred approach. 
+
+Both approaches are illustrated below.
+
+> Using an explicit `leaderboard_frame` for scoring may be useful in some cases, which is why the option is available.*
+
+### Use All Data - Preferred
+```{r}
+# Load library
+library(h2o)
+# https://github.com/h2oai/h2o-tutorials/blob/master/h2o-world-2017/automl/R/automl_regression_powerplant_output.Rmd
+ 
+# start h2o cluster
+invisible(h2o.init())
+
+df <- as.h2o(boston)
+ 
+# set label type
+y = 'medv'
+
+
+aml = h2o.automl(y = y, training_frame = df, max_runtime_secs = 120, seed = 1, max_models = 20, 
+                 project_name = "MyH2oExample")
+ 
+# AutoML Leaderboard
+lb = aml@leaderboard
+head(lb)
+
+# close h2o connection
+h2o.shutdown(prompt = F)
+```
+### Test/Train
+
+```{r}
+splits <- h2o.splitFrame(df)
+train <- splits[[1]]
+test <- splits[[2]]
+ 
+# set label type
+y = 'medv'
+
+aml2 = h2o.automl(y = y, training_frame = train, leaderboard_frame = test, max_runtime_secs = 120, seed = 1, max_models = 20, project_name = "MyH2oExample2")
+ 
+# AutoML Leaderboard
+lb = aml@leaderboard
+head(lb)
+ 
+# prediction result on test data
+prediction = h2o.predict(aml@leader, test[, -14]) %>% as.data.frame()
+head(prediction)
+
+h2o.performance(aml@leader, test)
+ 
+# create a confusion matrix - useful for classification
+# caret::confusionMatrix(test$medv, prediction$predict)
+ 
+# close h2o connection
+h2o.shutdown(prompt = F)
+```
+
+```{r echo=FALSE}
+rm(list = ls())
+```
+
+## autoML
+
+[automl](https://cran.r-project.org/web/packages/automl/vignettes/howto_automl.pdf) fits from simple regression to highly customizable deep neural networks either with gradient descent or metaheuristic, using automatic hyper parameters tuning and custom cost function. A mix inspired by the common tricks on Deep Learning and Particle Swarm Optimization. 
+
+3 functions are available:
+
+- `automl_train_manual`: the manual mode to train a model
+- `automl_train`: the automatic mode to train model
+- `automl_predict`: the prediction function to apply a trained model on data
+
+-  __modexec__ - `trainwgrad` (the default value) to train with gradient descent (suitable for all volume of data).  `trainwpso` to train using Particle Swarm Optimization, each particle represents a set of neural network weights (CAUTION: suitable for low volume of data, time consuming for medium to large volume of data)
+ - __numiterations__ number of training epochs (default value 50))
+- __psopartpopsize__ CAUTION: you should only change the values below if you know what you are doing
+
+```{r}
+data(iris)
+xmat <- cbind(iris[,2:4], as.numeric(iris$Species))
+ymat <- iris[,1]
+```
+
+```{r}
+library(automl)
+ 
+amlmodel <- automl_train_manual(Xref = xmat, Yref = ymat, 
+                                hpar = list(modexec = 'trainwpso', 
+                                            numiterations = 30,
+                                            psopartpopsize = 50))
+
+ 
+res <- cbind(ymat, automl_predict(model = amlmodel, X = xmat))
+colnames(res) <- c('actual', 'predict')
+head(res)
+```
+
+```{r}
+library(automl)
+
+iris_split <- iris %>% initial_split()
+iris_train <- training(iris_split)
+iris_test <- testing(iris_split)
+ 
+amlmodel = automl_train_manual(Xref = subset(iris_train, select = -c(Species)),
+                               Yref = subset(iris_train, select = c(Species))$Species %>% as.numeric(),
+                               hpar = list(learningrate = 0.01,
+                               minibatchsize = 2^2,
+                               numiterations = 60))
+ 
+prediction = automl_predict(model = amlmodel, X = iris_test[,1:4]) 
+ 
+prediction = ifelse(prediction > 2.5, 3, ifelse(prediction > 1.5, 2, 1)) %>% as.factor()
+ 
+caret::confusionMatrix(as.integer(iris_test$Species) %>% as.factor(), prediction)
+```
+
+```{r}
+rm(list = ls())
+```
+
+## autoXGboost
+
+The `autoxgboost` aims to find an optimal xgboost model automatically using the machine learning framework `mlr` and the bayesian optimization framework `mlrMBO.`
+
+> Install problem.  Submitted bug report
+
+`Error : (converted from warning) package 'ParamHelpers' was built under R version 3.5.3`
+`ERROR: lazy loading failed for package 'autoxgboost'`
+
+```{r eval=FALSE}
+# load library
+# https://github.com/ja-thomas/autoxgboost
+# devtools::install_github("ja-thomas/autoxgboost")
+library(autoxgboost)
+ 
+# create a classification task
+trainTask = makeClassifTask(data = train, target = "Species")
+ 
+# create a control object for optimizer
+ctrl = makeMBOControl()
+ctrl = setMBOControlTermination(ctrl, iters = 5L) 
+ 
+# fit the model
+res = autoxgboost(trainTask, control = ctrl, tune.threshold = FALSE)
+ 
+# do prediction and print confusion matrix
+prediction = predict(res, test[,1:4])
+caret::confusionMatrix(test$Species, prediction$data$response)
+```
+
 
 ## SuperLearner
 

@@ -40,7 +40,9 @@ if(!require(easypackages)){install.packages("easypackages")}
 library(easypackages)
 packages("tidyverse", "ggthemes", prompt = TRUE)
 options(digits = 3)
+```
 
+```{r}
 setwd("~/GitHub/MachineLearning/EDA") #change as needed
 ```
 
@@ -50,40 +52,11 @@ This document simply evaluates the capabilities of a variety of R EDA packages. 
 
 # Data
 
-Will use data provided by Robbie used the the mortgage lead score prediction algorithm.
-
 ```{r getData, message=FALSE}
 library(funModeling)
 myData <- heart_disease
 glimpse(myData)
 ```
-
-# Quick Aside
-
-The code below was built using the original raw data.  Nice code - took me a while to split a long table into 2.  This might be helpful in the future. (It seems pretty simple now - perhaps I should be embarrassed.)
-
-```{r getSources, message=FALSE}
-library(kableExtra)
-library(dplyr)
-
-tmpSources <- unique(myData$lead_source_code)
-tmpSources <- as.data.frame(tmpSources)
-
-# kable(tmpSources[1:15,])
-# kable(tmpSources[1:floor(nrow(tmpSources)/2),])
-
-kable1 <- tmpSources[1:floor(nrow(tmpSources)/2),]
-kable2 <- tmpSources[floor(nrow(tmpSources)/2+1):nrow(tmpSources),]
-
-# kable(list(kable1, kable2))
-
-kable(list(kable1, kable2), col.names = ("Lead Source")) %>% 
-  kable_styling(bootstrap_options = c("striped", "hover", full_width = F))
-```
-```{r echo=FALSE}
-detach("package:kableExtra", unload=TRUE) 
-```
-
 ----
 
 # EDA Package Review
@@ -100,6 +73,8 @@ The following R Packages are introduced:
 - descriptr
 - inspectdf
 - exploreR
+- ExPanDaR
+- janitor
 
 Also included:
 
@@ -738,6 +713,83 @@ Explore a Shiny version [here](https://jgassen.shinyapps.io/expand_fuel_economy/
 ## Overall Impression
 
 A quick way to review data.  Worth keeping in the EDA toolbelt.
+
+```{r echo=FALSE}
+detach("package:ExPanDaR", unload=TRUE)
+```
+
+# janitor
+```{r message=FALSE}
+packages("janitor")
+```
+
+The janitor functions expedite the initial data exploration and cleaning that comes with any new data set. 
+
+Clean data.frame names with `clean_names()`
+
++ Parses letter cases and separators to a consistent format.
++ Default is to snake_case, but other cases like camelCase are available
++ Handles special characters and spaces, including transliterating characters like œ to oe.
++ Appends numbers to duplicated names
++ Converts “%” to “percent” and “#” to “number” to retain meaning
++ Spacing (or lack thereof) around numbers is preserved
+
+```{r}
+test_df <- as.data.frame(matrix(ncol = 6))
+names(test_df) <- c("firstName", "ábc@!*", "% successful (2009)",
+                    "REPEAT VALUE", "REPEAT VALUE", "")
+test_df
+```
+
+```{r}
+test_df %>% clean_names()
+```
+
+`tabyl()` is a tidyverse-oriented replacement for `table()`. It counts combinations of one, two, or three variables, and then can be formatted with a suite of `adorn_*` functions to look just how you want. 
+
+```{r}
+mtcars %>%
+  tabyl(gear, cyl) %>%
+  adorn_totals("col") %>%
+  adorn_percentages("row") %>%
+  adorn_pct_formatting(digits = 2) %>%
+  adorn_ns() %>%
+  adorn_title("combined")
+```
+
+Easily does 3-way tables:
+
+```{r}
+starwars %>% filter(species == "Human") %>% tabyl(eye_color, skin_color, gender)
+```
+
+Simple to add to the tables:
+
+```{r}
+starwars %>% filter(species == "Human") %>% tabyl(eye_color, skin_color, gender) %>% 
+     adorn_totals("row") %>%
+     adorn_percentages("all") %>%
+     adorn_pct_formatting(digits = 1) %>%
+     adorn_ns %>%
+     adorn_title("combined")
+```
+Learn more [here](https://github.com/sfirke/janitor/blob/master/vignettes/tabyls.md).
+
+Much more to learn including:
+
+- `remove_empty()` rows and columns (really helpful when importing from Excel)
+- `remove_constant()` columns
+- Fix dates stored as serial numbers with `excel_numeric_to_date()` - awesome!
+- Elevate column names stored in a data.frame row using `rows_to_names`
+
+## Overall Impression
+
+This is an easy one - simply use it.
+
+```{r echo=FALSE}
+detach("package:janitor", unload=TRUE)
+```
+
 
 # Miscellaneous Code
 
